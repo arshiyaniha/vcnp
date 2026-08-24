@@ -1,0 +1,70 @@
+{
+  "schema_version": "1.0",
+  "generated_ts": "2026-08-24T17:40:37.090Z",
+  "note": "raw signals only — all animation logic lives in the dashboard app (plan §6.3)",
+  "roles": [
+    {
+      "role": "ceo",
+      "active_role": true,
+      "last_event_time": "2026-08-24T17:40:36.948Z",
+      "mood": "thinking",
+      "energy_hint": 100
+    },
+    {
+      "role": "planner",
+      "active_role": false,
+      "last_event_time": null,
+      "mood": "sleeping",
+      "energy_hint": 0
+    },
+    {
+      "role": "orchestrator",
+      "active_role": false,
+      "last_event_time": "2026-08-24T16:50:05.790Z",
+      "mood": "thinking",
+      "energy_hint": 49
+    },
+    {
+      "role": "executor",
+      "active_role": false,
+      "last_event_time": "2026-08-24T16:50:05.811Z",
+      "mood": "working",
+      "energy_hint": 49
+    },
+    {
+      "role": "qa",
+      "active_role": false,
+      "last_event_time": "2026-08-24T16:50:05.804Z",
+      "mood": "meeting",
+      "energy_hint": 49
+    },
+    {
+      "role": "security",
+      "active_role": false,
+      "last_event_time": null,
+      "mood": "sleeping",
+      "energy_hint": 0
+    },
+    {
+      "role": "rc",
+      "active_role": false,
+      "last_event_time": null,
+      "mood": "sleeping",
+      "energy_hint": 0
+    },
+    {
+      "role": "librarian",
+      "active_role": false,
+      "last_event_time": null,
+      "mood": "sleeping",
+      "energy_hint": 0
+    },
+    {
+      "role": "devops",
+      "active_role": false,
+      "last_event_time": null,
+      "mood": "sleeping",
+      "energy_hint": 0
+    }
+  ]
+}

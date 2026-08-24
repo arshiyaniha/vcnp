@@ -1,10 +1,120 @@
 {
   "schema_version": "1.0",
   "project": {
-    "name": null,
-    "goal": null,
-    "overall_progress": 0
+    "name": "VCNP Demo Site",
+    "goal": "Prove the golden path",
+    "overall_progress": 100
   },
-  "tasks": [],
-  "events_count": 3
+  "tasks": [
+    {
+      "task_id": "T-001",
+      "title": "Landing hero section",
+      "assignee_role": "executor",
+      "task_class": "C2",
+      "budget_tokens": 12000,
+      "acceptance_criteria": [
+        "index.html contains a <header>-less semantic <section> hero with one h1 and one CTA link",
+        "Markup is RTL-friendly (dir=\"rtl\", logical CSS properties only)",
+        "No external dependencies (no CDN fonts/scripts)"
+      ],
+      "context_refs": [],
+      "priority": "medium",
+      "definition_of_done": "All acceptance criteria pass and QA approves \"Landing hero section\".",
+      "status": "done",
+      "progress_percent": 100,
+      "artifacts": [
+        "demo/site/index.html"
+      ],
+      "blockers": [],
+      "notes_for_qa": "Hero copy + CTA implemented in demo/site/index.html; styles via assets/styles.css tokens.",
+      "created_ts": "2026-08-24T16:50:05.716Z",
+      "updated_ts": "2026-08-24T16:50:05.745Z",
+      "reports": [
+        {
+          "ts": "2026-08-24T16:50:05.728Z",
+          "status": "awaiting_orchestrator",
+          "progress_percent": 100
+        },
+        {
+          "ts": "2026-08-24T16:50:05.745Z",
+          "status": null,
+          "progress_percent": null
+        }
+      ]
+    },
+    {
+      "task_id": "T-002",
+      "title": "Features grid",
+      "assignee_role": "executor",
+      "task_class": "C2",
+      "budget_tokens": 12000,
+      "acceptance_criteria": [
+        "Exactly 3 feature cards inside a <section> of <article> elements",
+        "Grid collapses to one column under 640px (mobile-first)",
+        "Colors/spacing come from the design-system token variables"
+      ],
+      "context_refs": [],
+      "priority": "medium",
+      "definition_of_done": "All acceptance criteria pass and QA approves \"Features grid\".",
+      "status": "done",
+      "progress_percent": 100,
+      "artifacts": [
+        "demo/site/index.html",
+        "demo/site/assets/styles.css"
+      ],
+      "blockers": [],
+      "notes_for_qa": "3-card grid (Speed / Security / Transparency) using token variables.",
+      "created_ts": "2026-08-24T16:50:05.754Z",
+      "updated_ts": "2026-08-24T16:50:05.780Z",
+      "reports": [
+        {
+          "ts": "2026-08-24T16:50:05.763Z",
+          "status": "awaiting_orchestrator",
+          "progress_percent": 100
+        },
+        {
+          "ts": "2026-08-24T16:50:05.780Z",
+          "status": null,
+          "progress_percent": null
+        }
+      ]
+    },
+    {
+      "task_id": "T-003",
+      "title": "Contact footer",
+      "assignee_role": "executor",
+      "task_class": "C2",
+      "budget_tokens": 12000,
+      "acceptance_criteria": [
+        "<footer> holds contact email link and short about text",
+        "Semantic markup validated (footer > address/p)",
+        "Page ends with footer as the last landmark element"
+      ],
+      "context_refs": [],
+      "priority": "medium",
+      "definition_of_done": "All acceptance criteria pass and QA approves \"Contact footer\".",
+      "status": "done",
+      "progress_percent": 100,
+      "artifacts": [
+        "demo/site/index.html"
+      ],
+      "blockers": [],
+      "notes_for_qa": "Footer with mailto contact + about line added at end of body.",
+      "created_ts": "2026-08-24T16:50:05.790Z",
+      "updated_ts": "2026-08-24T16:50:05.811Z",
+      "reports": [
+        {
+          "ts": "2026-08-24T16:50:05.797Z",
+          "status": "awaiting_orchestrator",
+          "progress_percent": 100
+        },
+        {
+          "ts": "2026-08-24T16:50:05.811Z",
+          "status": null,
+          "progress_percent": null
+        }
+      ]
+    }
+  ],
+  "events_count": 18
 }

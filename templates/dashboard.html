@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>دیوار VCNP — VCNP Office Wall</title>
+<!--
+  VCNP Wall MVP (plan §6.3-6.4) — self-contained text-based visual board.
+  Inline CSS/JS, NO CDN, NO fetch(): data arrives via a plain <script src>
+  assignment (window.VCNP_DATA) so this page works when opened directly
+  from file:// . Regenerate data with report_generate (or:
+  node -e "require('./mcp/vcnp-office-mcp/src/tools/report').generate()").
+-->
+<style>
+  /* ---- Design tokens (from skills/web-design/assets/design-system-starter.css) ---- */
+  :root {
+    --color-brand-50:#eef4ff; --color-brand-100:#dce7ff;
+    --color-brand-500:#3b74f0; --color-brand-600:#2b5cd6; --color-brand-700:#2148ab;
+    --color-neutral-0:#ffffff; --color-neutral-50:#f7f8fa; --color-neutral-100:#eef0f4;
+    --color-neutral-300:#cdd3dd; --color-neutral-500:#6b7484; --color-neutral-700:#3a4150;
+    --color-neutral-900:#171b24;
+    --color-success:#1a9e5c; --color-warning:#d98a00; --color-danger:#d64545; --color-info:#2b7fd6;
+    --bg-page:var(--color-neutral-50); --bg-surface:var(--color-neutral-0);
+    --text-primary:var(--color-neutral-900); --text-secondary:var(--color-neutral-500);
+    --border-subtle:var(--color-neutral-300); --accent:var(--color-brand-500);
+    --space-xs:8px; --space-s:12px; --space-m:16px; --space-l:24px; --space-xl:32px;
+    --font-sans:"Vazirmatn","Segoe UI",Tahoma,system-ui,sans-serif;
+    --font-mono:ui-monospace,"Cascadia Code",Consolas,monospace;
+    --radius-m:10px; --radius-l:16px; --shadow-1:0 1px 2px rgb(23 27 36 / .08);
+  }
+
+  * { box-sizing:border-box; }
+  body {
+    margin:0; font-family:var(--font-sans); background:var(--bg-page);
+    color:var(--text-primary); line-height:1.6; font-size:15px;
+  }
+  a { color:var(--color-brand-600); }
+
+  header.page-head {
+    background:linear-gradient(135deg,var(--color-brand-600),var(--color-brand-700));
+    color:var(--color-neutral-0); padding:var(--space-l) var(--space-l);
+  }
+  header.page-head h1 { margin:0; font-size:22px; }
+  header.page-head h1 small { display:block; font-weight:400; font-size:12px; opacity:.75; letter-spacing:.4px; }
+  #generated-at { font-size:12px; opacity:.8; margin-top:4px; font-family:var(--font-mono); direction:ltr; display:inline-block; }
+
+  main { padding:var(--space-l); max-width:1400px; margin-inline:auto; }
+
+  h2 { font-size:16px; margin:var(--space-xl) 0 var(--space-s); }
+  h2 small { color:var(--text-secondary); font-weight:400; font-size:12px; margin-inline-start:6px; }
+
+  /* ---- Project summary ---- */
+  .project-card {
+    background:var(--bg-surface); border:1px solid var(--border-subtle);
+    border-radius:var(--radius-l); padding:var(--space-l); box-shadow:var(--shadow-1);
+  }
+  .project-name { font-size:19px; font-weight:700; margin:0; }
+  .project-goal { color:var(--text-secondary); margin:4px 0 var(--space-m); }
+  .progress-track { background:var(--color-neutral-100); border-radius:999px; height:10px; overflow:hidden; }
+  .progress-fill { background:linear-gradient(90deg,var(--accent),var(--color-brand-700)); height:100%; width:0; transition:width .4s ease; }
+  .progress-label { font-size:12px; color:var(--text-secondary); margin-top:4px; }
+
+  /* ---- Role chips ---- */
+  .role-chips { display:flex; flex-wrap:wrap; gap:var(--space-s); }
+  .chip {
+    display:inline-flex; align-items:center; gap:6px;
+    background:var(--bg-surface); border:1px solid var(--border-subtle);
+    border-radius:999px; padding:4px 12px; font-size:12.5px;
+  }
+  .chip .dot { width:9px; height:9px; border-radius:50%; background:var(--color-neutral-300); flex:none; }
+  .chip.active .dot { background:var(--color-success); box-shadow:0 0 0 3px rgb(26 158 92 / .18); }
+  .chip .mood { color:var(--text-secondary); }
+  .chip .en { direction:ltr; color:var(--text-secondary); font-size:11px; }
+
+  /* ---- Kanban ---- */
+  .kanban { display:grid; grid-template-columns:repeat(6,minmax(180px,1fr)); gap:var(--space-s); align-items:start; overflow-x:auto; padding-bottom:var(--space-s); }
+  @media (max-width:1100px){ .kanban { grid-template-columns:repeat(3,minmax(200px,1fr)); } }
+  @media (max-width:640px){ .kanban { grid-template-columns:1fr; } }
+  .column { background:var(--color-neutral-100); border-radius:var(--radius-m); padding:var(--space-s); min-height:90px; }
+  .column > h3 { margin:0 0 var(--space-s); font-size:13px; display:flex; justify-content:space-between; align-items:center; }
+  .column > h3 small { font-weight:400; color:var(--text-secondary); font-size:11px; }
+  .count { background:var(--bg-surface); border:1px solid var(--border-subtle); border-radius:999px; min-width:22px; text-align:center; font-size:11px; padding:1px 7px; font-family:var(--font-mono); }
+  .col-done > h3 { color:var(--color-success); }
+  .col-blocked > h3 { color:var(--color-danger); }
+  .task-card {
+    background:var(--bg-surface); border:1px solid var(--border-subtle);
+    border-radius:var(--radius-m); padding:var(--space-s); margin-bottom:var(--space-s);
+    box-shadow:var(--shadow-1); font-size:12.5px;
+  }
+  .task-card:last-child { margin-bottom:0; }
+  .task-id { font-family:var(--font-mono); font-size:11px; color:var(--color-brand-600); direction:ltr; display:inline-block; }
+  .task-title { font-weight:600; margin:2px 0 4px; }
+  .task-meta { color:var(--text-secondary); font-size:11px; display:flex; flex-wrap:wrap; gap:8px; }
+  .empty-col { color:var(--text-secondary); font-size:11.5px; text-align:center; padding:var(--space-s) 0; }
+
+  /* ---- Events ---- */
+  .events-list { list-style:none; margin:0; padding:0; background:var(--bg-surface); border:1px solid var(--border-subtle); border-radius:var(--radius-m); overflow:hidden; }
+  .events-list li { display:flex; gap:var(--space-s); align-items:baseline; padding:7px var(--space-s); border-bottom:1px solid var(--color-neutral-100); font-size:12.5px; }
+  .events-list li:last-child { border-bottom:none; }
+  .ev-ts { font-family:var(--font-mono); font-size:11px; color:var(--text-secondary); direction:ltr; flex:none; }
+  .ev-actor { background:var(--color-brand-50); color:var(--color-brand-700); border-radius:999px; padding:0 9px; font-size:11px; flex:none; }
+  .ev-action { font-family:var(--font-mono); font-size:11.5px; direction:ltr; word-break:break-word; }
+
+  footer.page-foot { text-align:center; color:var(--text-secondary); font-size:11.5px; padding:var(--space-l); }
+
+  /* ---- Fallback ---- */
+  .fallback {
+    max-width:640px; margin:var(--space-xl) auto; text-align:center;
+    background:var(--bg-surface); border:1px dashed var(--color-warning);
+    border-radius:var(--radius-l); padding:var(--space-xl);
+  }
+  .fallback h2 { margin-top:0; }
+  .fallback code { font-family:var(--font-mono); background:var(--color-neutral-100); padding:2px 7px; border-radius:6px; font-size:12px; direction:ltr; display:inline-block; }
+  [hidden] { display:none !important; }
+</style>
+</head>
+<body>
+
+<header class="page-head">
+  <h1>دیوار VCNP <small>VCNP OFFICE WALL — TEXT-BASED VISUAL BOARD</small></h1>
+  <span id="generated-at"></span>
+</header>
+
+<!-- Graceful fallback when office/dashboard-data.js is missing or corrupt -->
+<section id="fallback" class="fallback" hidden>
+  <h2>داده‌های دیوار یافت نشد <small style="font-weight:400">Wall data not found</small></h2>
+  <p>فایل <code>office/dashboard-data.js</code> کنار این صفحه نیست یا خراب است.</p>
+  <p style="font-size:12.5px;color:var(--text-secondary)">
+    Generate it by running <code>report_generate</code> (MCP tool) or:<br>
+    <code>node -e "require('./mcp/vcnp-office-mcp/src/tools/report').generate()"</code>
+  </p>
+</section>
+
+<main id="app" hidden>
+
+  <!-- Project summary -->
+  <section class="project-card" aria-labelledby="proj-h">
+    <h2 id="proj-h" style="margin-top:0">پروژه <small>Project</small></h2>
+    <p class="project-name" id="project-name">—</p>
+    <p class="project-goal" id="project-goal">—</p>
+    <div class="progress-track" role="progressbar" aria-label="پیشرفت کلی | Overall progress" id="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+    <p class="progress-label" id="progress-label">پیشرفت کلی: ۰٪ · Overall progress: 0%</p>
+  </section>
+
+  <!-- Role signals -->
+  <section aria-labelledby="roles-h">
+    <h2 id="roles-h">سیگنال نقش‌ها <small>Role signals — raw from office-live.json</small></h2>
+    <div class="role-chips" id="role-chips"></div>
+  </section>
+
+  <!-- Kanban -->
+  <section aria-labelledby="kanban-h">
+    <h2 id="kanban-h">تخته کانبان <small>Kanban board — rebuilt from the event ledger</small></h2>
+    <div class="kanban" id="kanban"></div>
+  </section>
+
+  <!-- Last events -->
+  <section aria-labelledby="events-h">
+    <h2 id="events-h">آخرین رویدادها <small>Last events — newest first</small></h2>
+    <ul class="events-list" id="events-list"></ul>
+  </section>
+
+</main>
+
+<footer class="page-foot">
+  منبع حقیقت: دفتر رویداد فقط-الحاق <span dir="ltr">office/events.log.jsonl</span> · Source of truth: the append-only event ledger
+</footer>
+
+<!-- Data assignment (single line): window.VCNP_DATA = { state, live, generated_at, recent_events }; -->
+<script src="../office/dashboard-data.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  var data = window.VCNP_DATA;
+  var app = document.getElementById('app');
+  var fallback = document.getElementById('fallback');
+
+  // --- graceful fallback: no data file, stale/corrupt assignment ---
+  if (!data || !data.state || !Array.isArray(data.state.tasks)) {
+    fallback.hidden = false;
+    return;
+  }
+  app.hidden = false;
+
+  var esc = function (s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '\x26').replace(/</g, '\x3C').replace(/>/g, '\x3E')
+      .replace(/"/g, '\x22').replace(/'/g, '\x27');
+  };
+
+  // --- project header ---
+  var st = data.state;
+  var proj = st.project || {};
+  document.getElementById('generated-at').textContent =
+    'generated: ' + (data.generated_at || '?') + ' · events: ' + (st.events_count || 0);
+
+  document.getElementById('project-name').textContent = proj.name || '(بدون نام)';
+  document.getElementById('project-goal').textContent = 'هدف: ' + (proj.goal || '—') +
+    ' · Goal: ' + (proj.goal || '-');
+  var pct = proj.overall_progress || 0;
+  document.getElementById('progress-fill').style.width = pct + '%';
+  document.getElementById('progress-bar').setAttribute('aria-valuenow', pct);
+  document.getElementById('progress-label').textContent =
+    'پیشرفت کلی: ' + pct + '٪ از ' + st.tasks.length + ' تسک · Overall progress: ' + pct + '% of ' + st.tasks.length + ' tasks';
+
+  // --- role signal chips (raw signals -> labels only, no fake animation) ---
+  var ROLE_FA = {
+    ceo: 'مدیرعامل', planner: 'برنامه‌ریز', orchestrator: 'ارکستراتور', executor: 'مجری',
+    qa: 'تضمین کیفیت', security: 'امنیت', rc: 'کنترل منابع', librarian: 'کتابدار', devops: 'دواپس'
+  };
+  var MOOD_FA = {
+    working: 'در حال کار', thinking: 'در حال فکر', sleeping: 'استراحت',
+    coffee: 'قهوه ☕', meeting: 'جلسه'
+  };
+  var chipsHtml = '';
+  (data.live && data.live.roles ? data.live.roles : []).forEach(function (r) {
+    var moodFa = MOOD_FA[r.mood] || r.mood || '—';
+    chipsHtml += '<span class="chip' + (r.active_role ? ' active' : '') + '" title="' +
+      esc(r.last_event_time || '') + '">' +
+      '<span class="dot"></span>' + esc(ROLE_FA[r.role] || r.role) +
+      ' <span class="en">' + esc(r.role) + '</span>' +
+      ' <span class="mood">· ' + esc(moodFa) + '</span></span>';
+  });
+  document.getElementById('role-chips').innerHTML = chipsHtml || '<em>سیگنالی موجود نیست</em>';
+
+  // --- kanban columns ---
+  var COLUMNS = [
+    ['todo', 'انجام نشده', 'Todo'],
+    ['doing', 'در حال انجام', 'Doing'],
+    ['awaiting_orchestrator', 'در انتظار ارکستراتور', 'Awaiting Orchestrator'],
+    ['review', 'بازبینی', 'Review'],
+    ['blocked', 'مسدود', 'Blocked'],
+    ['done', 'انجام شده', 'Done']
+  ];
+  var byStatus = {};
+  COLUMNS.forEach(function (c) { byStatus[c[0]] = []; });
+  st.tasks.forEach(function (t) {
+    (byStatus[t.status] ? byStatus[t.status] : byStatus.todo).push(t);
+  });
+
+  var kanbanHtml = '';
+  COLUMNS.forEach(function (c) {
+    var key = c[0], items = byStatus[key];
+    kanbanHtml += '<div class="column col-' + esc(key) + '"><h3>' + esc(c[1]) +
+      ' <small>' + esc(c[2]) + '</small><span class="count">' + items.length + '</span></h3>';
+    if (!items.length) {
+      kanbanHtml += '<div class="empty-col">— خالی —</div>';
+    }
+    items.forEach(function (t) {
+      kanbanHtml += '<div class="task-card">' +
+        '<span class="task-id">' + esc(t.task_id) + '</span>' +
+        '<div class="task-title">' + esc(t.title) + '</div>' +
+        '<div class="task-meta">' +
+        '<span>' + esc(t.assignee_role || 'unassigned') + '</span>' +
+        '<span>' + esc(t.task_class || '?') + '</span>' +
+        '<span>' + (t.progress_percent || 0) + '%</span>' +
+        '<span>' + (t.artifacts && t.artifacts.length ? t.artifacts.length + ' فایل' : 'بدون فایل') + '</span>' +
+        (t.blockers && t.blockers.length ? '<span style="color:var(--color-danger)">مسدود: ' + esc(t.blockers.join('؛ ')) + '</span>' : '') +
+        '</div></div>';
+    });
+    kanbanHtml += '</div>';
+  });
+  document.getElementById('kanban').innerHTML = kanbanHtml;
+
+  // --- last events (newest first) ---
+  var evs = (data.recent_events || []).slice().reverse();
+  var evHtml = '';
+  evs.slice(0, 15).forEach(function (e) {
+    evHtml += '<li><span class="ev-ts">' + esc((e.ts || '').replace('T', ' ').slice(0, 19)) + '</span>' +
+      '<span class="ev-actor">' + esc(e.actor || '?') + '</span>' +
+      '<span class="ev-action">' + esc(e.action || '') + (e.task_id ? ' · ' + esc(e.task_id) : '') + '</span></li>';
+  });
+  document.getElementById('events-list').innerHTML =
+    evHtml || '<li><em>رویدادی ثبت نشده — هنوز گزارشی تولید نشده است</em></li>';
+})();
+</script>
+
+</body>
+</html>

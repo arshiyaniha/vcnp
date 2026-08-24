@@ -5,10 +5,17 @@
  *   - office/BOARD.md : kanban mirror incl. the Awaiting Orchestrator written queue
  *   - office/office-live.json : RAW SIGNALS ONLY (active_role, last_event_time,
  *     mood hint, energy hint) — all animation logic lives in the dashboard (§6.3).
+ *   - office/dashboard-data.js : single-line `window.VCNP_DATA = {...}` assignment
+ *     so templates/dashboard.html + office/dashboard.html work from file:// with
+ *     no fetch/CORS (Wall MVP, plan §6.3-6.4).
  */
 
 const fs = require('fs');
+const path = require('path');
 const store = require('../store');
+
+const DASHBOARD_DATA_FILE = path.join(store.OFFICE_DIR, 'dashboard-data.js');
+const RECENT_EVENTS_LIMIT = 25;
 
 const ROLES = ['ceo', 'planner', 'orchestrator', 'executor', 'qa', 'security', 'rc', 'librarian', 'devops'];
 const COLUMNS = [
@@ -94,12 +101,37 @@ function deriveOfficeLive(events) {
   };
 }
 
+/**
+ * Wall MVP data payload (plan §6.3-6.4): ONE line — `window.VCNP_DATA = {...};`
+ * A plain <script src> assignment instead of fetch() so the dashboard works
+ * when opened directly from file:// (no server, no CORS).
+ * `recent_events` feeds the dashboard's last-events list; everything else is
+ * raw derived state + raw live signals (no animation logic here, §6.3).
+ */
+function writeDashboardData(state, live, events) {
+  const recent_events = events.slice(-RECENT_EVENTS_LIMIT).map((e) => ({
+    ts: e.ts,
+    actor: e.actor,
+    action: e.action,
+    task_id: e.task_id,
+  }));
+  const payload = {
+    state,
+    live,
+    generated_at: new Date().toISOString(),
+    recent_events,
+  };
+  store.atomicWriteText(DASHBOARD_DATA_FILE, 'window.VCNP_DATA = ' + JSON.stringify(payload) + ';\n');
+}
+
 async function generate() {
   const events = store.readEvents();
   const state = store.rebuildState(events);
+  const live = deriveOfficeLive(events);
 
   store.atomicWriteText(store.BOARD_FILE, renderBoard(state));
-  store.atomicWriteJson(store.OFFICE_LIVE_FILE, deriveOfficeLive(events));
+  store.atomicWriteJson(store.OFFICE_LIVE_FILE, live);
+  writeDashboardData(state, live, events);
 
   const byStatus = {};
   for (const t of state.tasks) byStatus[t.status] = (byStatus[t.status] || 0) + 1;
@@ -107,6 +139,7 @@ async function generate() {
     ok: true,
     board_file: 'office/BOARD.md',
     live_file: 'office/office-live.json',
+    dashboard_data_file: path.relative(store.WORKSPACE, DASHBOARD_DATA_FILE),
     project: state.project,
     tasks_total: state.tasks.length,
     by_status: byStatus,
@@ -119,13 +152,14 @@ const defs = [
     name: 'report_generate',
     description:
       'Regenerate office/BOARD.md (kanban columns incl. Awaiting Orchestrator) from rebuilt state and write ' +
-      'office/office-live.json (per-role active_role, last_event_time, mood hint: working/thinking/sleeping/coffee/meeting).',
+      'office/office-live.json (per-role active_role, last_event_time, mood hint: working/thinking/sleeping/coffee/meeting) ' +
+      'and office/dashboard-data.js (single-line window.VCNP_DATA assignment for the file:// dashboard).',
     inputSchema: { type: 'object', properties: {} },
     handler: async () => generate(),
     format: (r) =>
-      `Report regenerated — BOARD.md (${r.tasks_total} tasks) + office-live.json (${r.roles_covered} roles). ` +
+      `Report regenerated — BOARD.md (${r.tasks_total} tasks) + office-live.json (${r.roles_covered} roles) + dashboard-data.js. ` +
       `Project "${r.project.name || '?'}" overall progress: ${r.project.overall_progress}%`,
   },
 ];
 
-module.exports = { defs, generate, deriveOfficeLive, renderBoard };
+module.exports = { defs, generate, deriveOfficeLive, renderBoard, writeDashboardData };

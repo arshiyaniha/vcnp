@@ -1,0 +1,626 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vibe-Office Dashboard — دیوار زندهٔ VCNP</title>
+<!--
+  Vibe-Office Dashboard — retro pixel-art Living Office Wall (plan §6.3-6.4, phase P6).
+  ONE self-contained file. ZERO dependencies, ZERO network requests, ZERO fetched
+  fonts/images: every graphic is flat-color CSS blocks (crisp pixel edges, no
+  gradients, no blur) + emoji mandated by the phase spec. Scene is a 640x360
+  logical-resolution pixel grid scaled by INTEGER factors (never blurred).
+  Works over file:// — data arrives via a plain <script src> assignment
+  (window.VCNP_DATA), no fetch(). Poll-free: snapshot embedded at open time;
+  the ⟳ button reloads the page honestly. Regenerate data with the
+  report_generate MCP tool (or:
+  node -e "require('./mcp/vcnp-office-mcp/src/tools/report').generate()").
+-->
+<style>
+  :root{
+    --bg:#101319; --panel:#161c2a; --panel2:#1e2740; --line:#2a3550;
+    --text:#eef1f8; --mut:#94a3b8; --brand:#3b82f6; --gold:#fbbf24;
+    --ok:#22c55e; --warn:#f59e0b; --bad:#ef4444;
+    --ink:#1b1b22; --wall:#3a3a4a; --wood:#8a5f38; --wood-d:#5c3d22;
+    --night:0; --warm:0; /* driven by the JS clock */
+    --font:"Vazirmatn","Segoe UI",Tahoma,system-ui,sans-serif;
+    --mono:ui-monospace,"Cascadia Code",Consolas,"Courier New",monospace;
+  }
+  *{box-sizing:border-box;border-radius:0!important}
+  html,body{margin:0}
+  body{background:var(--bg);color:var(--text);font-family:var(--font);font-size:14px;line-height:1.6}
+
+  /* ---------- header ---------- */
+  header.bar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:10px 16px;
+    background:#1e2a4a;border-bottom:4px solid #0b0e15}
+  header.bar h1{margin:0;font-size:18px;font-family:var(--mono);letter-spacing:.5px}
+  header.bar h1 small{display:block;font-family:var(--font);font-weight:400;font-size:11px;color:#c7d2fe}
+  .hmeta{display:flex;flex-direction:column;gap:2px;font-size:11px;color:#c7d2fe}
+  .hmeta .ts{font-family:var(--mono);direction:ltr;display:inline-block}
+  .hspace{flex:1}
+  .btn{background:#334155;border:2px solid #0b0e15;color:#e2e8f0;padding:5px 12px;cursor:pointer;
+    font-family:inherit;font-size:13px;box-shadow:2px 2px 0 #0b0e15}
+  .btn:hover{background:#475569}
+  .btn:active{transform:translate(2px,2px);box-shadow:none}
+  .btn:focus-visible{outline:3px solid var(--gold);outline-offset:2px}
+
+  /* ---------- layout ---------- */
+  main{display:grid;grid-template-columns:minmax(0,1fr) 300px;min-height:calc(100vh - 88px)}
+  main.noside{grid-template-columns:minmax(0,1fr)}
+  @media (max-width:980px){ main,main.noside{grid-template-columns:minmax(0,1fr)} }
+
+  /* ---------- stage + integer scaling ---------- */
+  .stage{padding:14px;overflow:auto}
+  .fit-outer{margin:0 auto}
+  .fit{width:640px;height:360px;transform-origin:top left;image-rendering:pixelated}
+
+  /* ---------- scene (640x360 logical pixels) ---------- */
+  #scene{position:relative;width:640px;height:360px;background:#d8cfbc;
+    border:6px solid #23232e;box-shadow:inset 0 0 0 2px #4a4a5a;overflow:hidden}
+  .zone{position:absolute;border:3px solid var(--wall)}
+  .z-ceo {left:14px; top:22px; width:144px;height:90px; background:#e6d69f}
+  .z-plan{left:164px;top:22px; width:132px;height:90px; background:#dfd7ee;border-style:dashed}
+  .z-meet{left:302px;top:22px; width:196px;height:200px;background:#cfe0f2;border-width:4px}
+  .z-side{left:14px; top:118px;width:144px;height:126px;background:#ecd9c8;border-style:dashed}
+  .z-exec{left:14px; top:246px;width:282px;height:104px;background:#d7e6d0;border-style:dashed}
+  .z-gate{left:302px;top:228px;width:196px;height:122px;background:#eed6d0}
+  .z-ops {left:504px;top:228px;width:130px;height:122px;background:#d5daec;border-style:dashed}
+  .z-cap{position:absolute;top:-3px;left:6px;transform:translateY(-100%);font-size:9px;
+    font-family:var(--mono);direction:rtl;background:#23232e;color:#e2e8f0;padding:0 6px;line-height:1.8;z-index:5}
+
+  /* ---------- pixel person (head block + body block) ---------- */
+  .unit{position:absolute;width:56px;text-align:center;font-family:var(--mono);z-index:10}
+  .avatar{position:relative;width:20px;height:26px;margin:0 auto;transition:opacity .4s,filter .4s}
+  .avatar .hair{display:block;width:14px;height:4px;margin:0 auto;background:var(--hair,#333)}
+  .avatar .head{display:block;width:12px;height:9px;margin:0 auto;background:var(--skin,#f0c8a0)}
+  .avatar .body{display:block;width:16px;height:11px;margin:0 auto;background:var(--c,#64748b)}
+  .badge{position:absolute;top:-11px;right:-6px;font-size:10px;line-height:1}
+  .tool{position:absolute;right:-11px;bottom:-2px;font-size:9px;opacity:0}
+  .sleepy{position:absolute;left:50%;top:-6px;transform:translateX(-50%);font-size:9px;opacity:0}
+  .bubble{position:absolute;top:-16px;left:50%;margin-left:-8px;font-size:11px;opacity:0;width:16px}
+  .coffee{position:absolute;right:-13px;top:22px;font-size:11px;opacity:0}
+  .zzz{position:absolute;left:-10px;top:-8px;font-size:9px;font-weight:700;color:#3b82f6;opacity:0;font-family:var(--mono)}
+  .yawn{position:absolute;left:-11px;top:-6px;font-size:10px}
+  .online{position:absolute;left:-4px;top:2px;width:3px;height:3px;background:var(--ok);opacity:0}
+  .desk{width:44px;height:12px;margin:2px auto 0;background:var(--wood);
+    border:2px solid var(--wood-d);box-shadow:0 3px 0 var(--wood-d);position:relative;transition:opacity .4s}
+  .lamp{position:absolute;left:3px;top:-6px;width:5px;height:5px;background:#ffd166}
+  .nametag{display:inline-block;font-size:7px;line-height:1.5;background:#000000aa;color:#e2e8f0;
+    padding:0 3px;margin-top:3px;max-width:56px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .mtag{display:none;font-size:7px;color:#1d4ed8;background:#dbeafe;padding:0 3px;margin-top:1px}
+  .energy{width:40px;height:5px;margin:2px auto 0;background:#222;border:1px solid #000}
+  .energy .fill{display:block;height:100%;width:20%;background:var(--ok);transition:width .4s}
+  .energy .fill.mid{background:var(--warn)} .energy .fill.low{background:var(--bad)}
+
+  /* ---------- state animations (choppy 2-frame pixel motion) ---------- */
+  .st-working .avatar{animation:bob .7s steps(1) infinite}
+  .st-working .tool{opacity:1;animation:taptap .34s steps(1) infinite}
+  .st-thinking .bubble{opacity:1;animation:hoptwo .9s steps(1) infinite}
+  .st-coffee .coffee{opacity:1;animation:hoptwo 1.2s steps(1) infinite}
+  .st-coffee .avatar{animation:bob 1.6s steps(1) infinite}
+  .st-sleeping .avatar{filter:grayscale(.8) brightness(.7)}
+  .st-sleeping .sleepy{opacity:1}
+  .st-sleeping .zzz{opacity:1;animation:zrise 2.2s steps(4) infinite}
+  .unit.away .avatar,.unit.away .desk{opacity:.12;filter:grayscale(1)}
+  .unit.away .mtag{display:inline-block}
+  @keyframes bob{0%,49%{transform:translateY(0)}50%,100%{transform:translateY(-2px)}}
+  @keyframes taptap{0%,49%{transform:translate(0,0)}50%,100%{transform:translate(1px,-1px)}}
+  @keyframes hoptwo{0%,49%{margin-top:0}50%,100%{margin-top:-3px}}
+  @keyframes zrise{0%{opacity:0;transform:translate(0,0)}25%{opacity:1}
+    75%{opacity:1}100%{opacity:0;transform:translate(-8px,-14px)}}
+
+  /* ---------- meeting room: table, chairs, screen, seats ---------- */
+  .table{position:absolute;left:374px;top:96px;width:52px;height:52px;background:#b97f46;
+    border:3px solid var(--wood-d);box-shadow:0 4px 0 var(--wood-d);z-index:6}
+  .chair{position:absolute;width:12px;height:12px;background:#64748b;border:2px solid #3f4a5a;z-index:5}
+  .seat{position:absolute;width:28px;height:34px;transform:translate(-50%,-50%);z-index:7}
+  .mini{position:absolute;left:50%;bottom:2px;width:20px;margin-left:-10px;opacity:0;
+    transition:opacity .4s;transform:translateY(4px)}
+  .mini .chairback{display:block;width:16px;height:5px;margin:0 auto;background:#475569;border:2px solid #333d4a}
+  .mini .hair{display:block;width:12px;height:3px;margin:0 auto;background:var(--hair,#333)}
+  .mini .head{display:block;width:10px;height:8px;margin:0 auto;background:var(--skin,#f0c8a0)}
+  .mini .body{display:block;width:14px;height:8px;margin:0 auto;background:var(--c,#64748b)}
+  .mini .badge{top:-10px;right:-4px;font-size:9px}
+  .seat.here .mini{opacity:1;transform:translateY(0)}
+  .screen{position:absolute;left:330px;top:27px;width:140px;height:32px;background:#0b1220;
+    border:3px solid #374151;box-shadow:0 3px 0 #1f2937;overflow:hidden;z-index:4}
+  .screen .tick{position:absolute;top:50%;margin-top:-5px;white-space:nowrap;font-family:var(--mono);
+    font-size:8px;color:#4ade80;direction:ltr;animation:crawl 14s linear infinite}
+  .screen::after{content:"";position:absolute;inset:0;background:#ffffff0d;animation:flick 2.8s steps(2) infinite}
+  @keyframes crawl{from{transform:translateX(150px)}to{transform:translateX(-640px)}}
+  @keyframes flick{0%,92%{opacity:.4}93%,100%{opacity:1}}
+
+  /* ---------- props ---------- */
+  .plant{position:absolute;z-index:8}
+  .plant .pot{width:10px;height:6px;margin:0 auto;background:#a0522d;border:2px solid #6b3410}
+  .plant .leaf{width:12px;height:5px;margin:0 auto;background:#2f9e44;border:2px solid #1b6b2f}
+  .plant .leaf2{width:8px;height:5px;margin:-2px auto 0;background:#37b24d;border:2px solid #1b6b2f}
+  .clockp{position:absolute;left:560px;top:3px;width:18px;height:18px;background:#f8fafc;
+    border:3px solid var(--ink);z-index:5}
+  .clockp i{position:absolute;left:50%;bottom:50%;width:2px;background:var(--ink);transform-origin:50% 100%}
+  .clockp .hh{height:4px;margin-left:-1px}
+  .clockp .mh{height:6px;margin-left:-1px;background:#dc2626}
+  .board{position:absolute;left:112px;top:4px;width:56px;height:20px;background:#f1f5f9;
+    border:3px solid var(--wood-d);z-index:5}
+  .board b{position:absolute;width:6px;height:6px}
+  .board u{position:absolute;left:4px;right:4px;height:2px;background:#94a3b8}
+  .win{position:absolute;background:#0d1b3a;border:3px solid var(--wood-d);z-index:5}
+  .win .sky-day,.win .sky-night{position:absolute;inset:0}
+  .win .sky-day{background:#7ec8f0;opacity:calc(1 - var(--night))}
+  .win .sky-night{background:#0d1b3a;opacity:var(--night)}
+  .win .star{position:absolute;width:2px;height:2px;background:#f8fafc;opacity:var(--night)}
+  .win .bar{position:absolute;background:var(--wood-d)}
+  .outlet{position:absolute;left:216px;top:336px;width:8px;height:8px;background:#e8d8b0;
+    border:2px solid var(--ink);z-index:8}
+  .cable{position:absolute;background:var(--ink);z-index:7}
+  .laptop{position:absolute;left:108px;top:268px;width:16px;height:11px;background:#94a3b8;
+    border:2px solid #475569;border-bottom-width:4px;z-index:9}
+  .mug{position:absolute;width:6px;height:6px;background:#f8fafc;border:2px solid #94a3b8;z-index:9}
+  .rack{position:absolute;left:576px;top:246px;width:30px;height:72px;background:#232a3a;
+    border:3px solid #0d1220;box-shadow:3px 3px 0 #0d1220;z-index:8}
+  .rack i{position:absolute;left:5px;width:6px;height:4px;background:var(--ok);animation:blink 1.3s steps(2,start) infinite}
+  .rack i:nth-child(2n){background:#ef4444;animation-delay:.4s}
+  .rack i:nth-child(3n){animation-delay:.8s}
+  @keyframes blink{50%{opacity:.15}}
+  .gatestripe{position:absolute;left:372px;top:258px;width:10px;height:64px;z-index:6;
+    background:repeating-linear-gradient(45deg,var(--bad) 0 6px,#f8fafc 6px 12px);
+    border:2px solid var(--ink)}
+  .podghost{position:absolute;width:56px;text-align:center;font-family:var(--mono);opacity:.5;z-index:9}
+  .podghost .desk{opacity:.7}
+  .podghost .nametag{color:#cbd5e1}
+
+  /* ---------- night lamps + tints (flat, no gradients) ---------- */
+  .lampglow{position:absolute;z-index:9;opacity:var(--night);transition:opacity 1.5s}
+  .lampglow .halo{position:absolute;left:-6px;top:-6px;width:22px;height:22px;background:#ffb70344}
+  .lampglow .core{position:absolute;left:0;top:0;width:10px;height:10px;background:#ffd166}
+  .tint{position:absolute;inset:0;pointer-events:none;z-index:40}
+  #tint-night{background:#0b1d4d;opacity:calc(var(--night)*.55)}
+  #tint-warm{background:#ff9e2c;opacity:calc(var(--warm)*.35)}
+
+  /* ---------- confetti (pixel squares) ---------- */
+  .confetti{position:absolute;inset:0;pointer-events:none;z-index:60}
+  .confetti i{position:absolute;left:50%;top:30%;width:4px;height:6px;opacity:0;background:var(--c);
+    animation:pop .9s steps(6) forwards;animation-delay:calc(var(--i)*40ms)}
+  .confetti b{position:absolute;left:50%;top:24%;margin-left:-8px;font-size:14px;opacity:0;
+    animation:pope 1s steps(4) forwards}
+  @keyframes pop{0%{opacity:1;transform:translate(0,0)}100%{opacity:0;transform:translate(var(--dx),var(--dy))}}
+  @keyframes pope{0%{opacity:1;transform:scale(.6)}60%{opacity:1;transform:scale(1.3)}
+    100%{opacity:0;transform:scale(1)}}
+
+  /* ---------- legend + footer note ---------- */
+  .legend{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;padding:8px 12px;
+    border-top:4px solid #0b0e15;background:#151a26}
+  .lg{font-size:10.5px;color:#cbd5e1;background:var(--panel2);border:1px solid #32406180;padding:1px 9px}
+  .foot-note{text-align:center;color:var(--mut);font-size:11.5px;padding:4px 12px 14px}
+  .foot-note code{font-family:var(--mono);direction:ltr;display:inline-block;font-size:10.5px}
+
+  /* ---------- status sidebar ---------- */
+  aside#sidebar{background:var(--panel);border-inline-start:4px solid #0b0e15;padding:12px 14px;overflow-y:auto}
+  aside h2{font-size:13.5px;margin:14px 0 6px}
+  aside h2:first-child{margin-top:2px}
+  aside h2 small{color:var(--mut);font-weight:400;font-size:10px;margin-inline-start:5px}
+  .sb-progress{background:#0d1220;border:2px solid var(--line);height:10px;overflow:hidden}
+  .sb-progress .fill{display:block;height:100%;width:0;background:var(--brand);transition:width .4s}
+  .sb-plabel{font-size:11px;color:var(--mut);margin:4px 0 0}
+  .counts{display:grid;grid-template-columns:1fr 1fr;gap:5px}
+  .cnt{display:flex;align-items:center;gap:5px;background:var(--panel2);border:1px solid #32406166;
+    padding:3px 7px;font-size:11px}
+  .cnt .dot{width:7px;height:7px;flex:none}
+  .cnt .n{margin-inline-start:auto;font-family:var(--mono);direction:ltr}
+  .ev-list{list-style:none;margin:0;padding:0}
+  .ev-list li{display:flex;gap:5px;align-items:baseline;padding:4px 0;border-bottom:1px solid #2a355088;font-size:10.5px}
+  .ev-list li:last-child{border-bottom:none}
+  .ev-ts{font-family:var(--mono);color:var(--mut);direction:ltr;flex:none;font-size:9.5px}
+  .ev-actor{background:#1e3a8a66;color:#93c5fd;padding:0 6px;font-size:9.5px;flex:none}
+  .ev-action{font-family:var(--mono);direction:ltr;word-break:break-word;color:#cbd5e1}
+
+  /* ---------- empty state ---------- */
+  .fallback{max-width:620px;margin:8vh auto;text-align:center;background:var(--panel);
+    border:3px dashed var(--warn);padding:32px 24px;box-shadow:6px 6px 0 #00000066}
+  .fallback h2{margin-top:0}
+  .fallback code{font-family:var(--mono);background:#0d1220;border:1px solid var(--line);
+    padding:2px 8px;font-size:12px;direction:ltr;display:inline-block}
+  .fallback .hint{color:var(--mut);font-size:12.5px}
+  [hidden]{display:none!important}
+  @media (prefers-reduced-motion:reduce){
+    *,*::before,*::after{animation:none!important;transition:none!important}
+  }
+</style>
+</head>
+<body>
+
+<header class="bar">
+  <h1>Vibe-Office Dashboard <small>دیوار زندهٔ VCNP — اتاق پیکسل‌آرت</small></h1>
+  <div class="hmeta">
+    <span class="ts" id="gen-ts"></span>
+    <span>ساعت محلی: <span class="ts" id="clock">--:--</span> · <span id="dn-label">روز</span></span>
+  </div>
+  <span class="hspace"></span>
+  <button class="btn" id="btn-side" aria-controls="sidebar" aria-expanded="true"
+    title="نمایش/پنهان‌سازی پنل وضعیت | Toggle status panel">وضعیت ▭</button>
+  <button class="btn" id="btn-refresh" title="بارگیری دوبارهٔ داده | Reload data"
+    aria-label="رفرش صفحه و بارگیری دوبارهٔ داده‌ها | Refresh page and reload data"><span class="ic">⟳</span> رفرش</button>
+</header>
+
+<!-- Graceful empty state when office/dashboard-data.js is missing or corrupt -->
+<section id="empty" class="fallback" hidden>
+  <h2>داده‌ای روی دیوار نیست <small style="font-weight:400">Wall data not found</small></h2>
+  <p>فایل <code>office/dashboard-data.js</code> کنار این صفحه پیدا نشد یا خراب است.</p>
+  <p class="hint">تولید داده با ابزار MCP <code>report_generate</code> یا این فرمان:</p>
+  <p><code>node -e "require('./mcp/vcnp-office-mcp/src/tools/report').generate()"</code></p>
+  <p class="hint">سپس همین صفحه را دوباره باز کنید (رفرش).</p>
+</section>
+
+<div id="app" hidden>
+<main>
+  <div>
+    <div class="stage">
+      <div class="fit-outer" id="fit-outer">
+        <div class="fit" id="fit">
+          <div id="scene" role="img" aria-label="صحنهٔ دفتر پیکسل‌آرت ویب‌آفیس با ۹ کارمند و اتاق جلسات | Pixel-art vibe-office scene with 9 employees and a meeting room">
+
+            <!-- rooms -->
+            <section class="zone z-ceo"><span class="z-cap">دفتر مدیرعامل · CEO Office</span></section>
+            <section class="zone z-plan"><span class="z-cap">ردیف برنامه‌ریزی · Planning Row</span></section>
+            <section class="zone z-meet"><span class="z-cap">اتاق جلسات · Meeting Room</span></section>
+            <section class="zone z-side"><span class="z-cap">میزهای کناری · Side Desks</span></section>
+            <section class="zone z-exec"><span class="z-cap">پادهای مجری · Executor Pods</span></section>
+            <section class="zone z-gate"><span class="z-cap">گیت بازبینی و امنیت · QA + Security Gate</span></section>
+            <section class="zone z-ops"><span class="z-cap">دواپس · DevOps</span></section>
+
+            <!-- wall props -->
+            <div class="win" style="left:500px;top:4px;width:50px;height:24px">
+              <span class="sky-day"></span><span class="sky-night"></span>
+              <i class="star" style="left:8px;top:6px"></i><i class="star" style="left:20px;top:12px"></i>
+              <i class="star" style="left:34px;top:5px"></i><i class="star" style="left:42px;top:14px"></i>
+              <i class="bar" style="left:50%;top:0;bottom:0;width:3px;margin-left:-2px"></i>
+              <i class="bar" style="top:50%;left:0;right:0;height:3px;margin-top:-2px"></i>
+            </div>
+            <div class="clockp" aria-hidden="true"><i class="hh" id="clk-hh"></i><i class="mh" id="clk-mh"></i></div>
+            <div class="board" aria-hidden="true">
+              <u style="top:4px"></u><u style="top:9px"></u><u style="top:14px"></u>
+              <b style="left:38px;top:3px;background:#ef4444"></b>
+              <b style="left:46px;top:9px;background:#fbbf24"></b>
+              <b style="left:38px;top:14px;background:#22c55e"></b>
+            </div>
+            <div class="win" style="left:558px;top:4px;width:56px;height:24px">
+              <span class="sky-day"></span><span class="sky-night"></span>
+              <i class="star" style="left:10px;top:7px"></i><i class="star" style="left:26px;top:13px"></i>
+              <i class="star" style="left:44px;top:6px"></i>
+              <i class="bar" style="left:50%;top:0;bottom:0;width:3px;margin-left:-2px"></i>
+              <i class="bar" style="top:50%;left:0;right:0;height:3px;margin-top:-2px"></i>
+            </div>
+
+            <!-- meeting room interior -->
+            <div class="screen" aria-hidden="true"><span class="tick" id="ticker">VCNP OFFICE // LIVE</span></div>
+            <div class="table"></div>
+            <span class="chair" style="left:394px;top:82px"></span>
+            <span class="chair" style="left:428px;top:100px"></span>
+            <span class="chair" style="left:428px;top:134px"></span>
+            <span class="chair" style="left:394px;top:152px"></span>
+            <span class="chair" style="left:360px;top:134px"></span>
+            <span class="chair" style="left:360px;top:100px"></span>
+            <div id="seats">
+              <div class="seat" data-seat="0" style="left:400px;top:88px"></div>
+              <div class="seat" data-seat="1" style="left:434px;top:106px"></div>
+              <div class="seat" data-seat="2" style="left:434px;top:140px"></div>
+              <div class="seat" data-seat="3" style="left:400px;top:158px"></div>
+              <div class="seat" data-seat="4" style="left:366px;top:140px"></div>
+              <div class="seat" data-seat="5" style="left:366px;top:106px"></div>
+            </div>
+
+            <!-- context props -->
+            <div class="plant" style="left:130px;top:82px"><span class="leaf"></span><span class="leaf2"></span><span class="pot"></span></div>
+            <div class="plant" style="left:470px;top:188px"><span class="leaf"></span><span class="leaf2"></span><span class="pot"></span></div>
+            <div class="plant" style="left:272px;top:322px"><span class="leaf"></span><span class="leaf2"></span><span class="pot"></span></div>
+            <div class="gatestripe" title="گیت بازبینی/امنیت | Review + Security gate"></div>
+            <div class="rack" aria-hidden="true">
+              <i style="top:8px"></i><i style="top:18px"></i><i style="top:28px"></i>
+              <i style="top:38px"></i><i style="top:48px"></i><i style="top:58px"></i>
+            </div>
+            <div class="outlet" aria-hidden="true"></div>
+            <span class="cable" style="left:124px;top:334px;width:94px;height:2px"></span>
+            <span class="cable" style="left:122px;top:281px;width:2px;height:55px"></span>
+            <div class="laptop" aria-hidden="true"></div>
+            <span class="mug" style="left:322px;top:296px" title="قهوه | coffee"></span>
+            <span class="mug" style="left:36px;top:166px" title="قهوه | coffee"></span>
+
+            <!-- night lamp glows -->
+            <div class="lampglow" style="left:66px;top:58px"><span class="halo"></span><span class="core"></span></div>
+            <div class="lampglow" style="left:518px;top:260px"><span class="halo"></span><span class="core"></span></div>
+            <div class="lampglow" style="left:395px;top:117px"><span class="halo"></span><span class="core"></span></div>
+
+            <!-- workstation anchors (units injected by JS) -->
+            <div id="spot-ceo" style="position:absolute;left:52px;top:26px"></div>
+            <div id="spot-planner" style="position:absolute;left:172px;top:28px"></div>
+            <div id="spot-orchestrator" style="position:absolute;left:234px;top:28px"></div>
+            <div id="spot-executor" style="position:absolute;left:94px;top:252px"></div>
+            <div id="spot-qa" style="position:absolute;left:310px;top:254px"></div>
+            <div id="spot-security" style="position:absolute;left:392px;top:254px"></div>
+            <div id="spot-rc" style="position:absolute;left:24px;top:122px"></div>
+            <div id="spot-librarian" style="position:absolute;left:24px;top:180px"></div>
+            <div id="spot-devops" style="position:absolute;left:510px;top:254px"></div>
+
+            <!-- empty executor pods -->
+            <div class="podghost" style="left:24px;top:258px"><div class="desk"></div>
+              <span class="nametag">پاد خالی · empty</span></div>
+            <div class="podghost" style="left:164px;top:258px"><div class="desk"></div>
+              <span class="nametag">پاد خالی · empty</span></div>
+
+            <!-- day/night tints -->
+            <div class="tint" id="tint-warm" aria-hidden="true"></div>
+            <div class="tint" id="tint-night" aria-hidden="true"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="legend" id="legend">
+      <span class="lg">💼 کار | working</span><span class="lg">🤔 فکر | thinking</span>
+      <span class="lg">☕ قهوه | coffee</span><span class="lg">😴 خواب | sleeping</span>
+      <span class="lg">🗣️ جلسه → میز جلسات | meeting</span><span class="lg">🎉 جشن | celebration</span>
+      <span class="lg">🥱 انرژی زیر ۳۵٪ | low energy</span><span class="lg">🟢 آنلاین | online dot</span>
+      <span class="lg">💡 چراغ شبانه | night lamp</span>
+    </div>
+    <p class="foot-note">برای داده‌ی زنده، صفحه را رفرش کنید · Refresh the page for live data —
+      منبع: <code>office/events.log.jsonl</code></p>
+  </div>
+
+  <aside id="sidebar" aria-label="پنل وضعیت | Status panel">
+    <h2>پیشرفت کلی <small>Overall progress</small></h2>
+    <div class="sb-progress" role="progressbar" aria-label="پیشرفت کلی | Overall progress" id="sb-bar">
+      <span class="fill" id="sb-fill"></span></div>
+    <p class="sb-plabel" id="sb-plabel">—</p>
+    <h2>کانبان <small>Kanban counts</small></h2>
+    <div class="counts" id="sb-counts"></div>
+    <h2>آخرین رویدادها <small>Last 10 events</small></h2>
+    <ul class="ev-list" id="sb-events"></ul>
+  </aside>
+</main>
+</div>
+
+<noscript><p style="text-align:center">این صفحه برای انیمیشن به جاوااسکریپت نیاز دارد.</p></noscript>
+
+<!-- Relative path resolves correctly from BOTH templates/ and office/ (office/../office == office) -->
+<script src="../office/dashboard-data.js"></script>
+<script>
+(function () {
+  'use strict';
+  function $(id) { return document.getElementById(id); }
+  function esc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '\x26').replace(/</g, '\x3C').replace(/>/g, '\x3E')
+      .replace(/"/g, '\x22').replace(/'/g, '\x27');
+  }
+
+  var KNOWN_MOOD = { working: 1, thinking: 1, coffee: 1, sleeping: 1, meeting: 1 };
+  var MOOD_FA = { working: 'کار 💼', thinking: 'فکر 🤔', coffee: 'قهوه ☕',
+    sleeping: 'خواب 😴', meeting: 'جلسه 🗣️' };
+  var CELEBRATE_RE = /done|complet|milestone|approv|pass|merge|deploy/i;
+
+  /* 9 distinct pixel citizens: unique hair/skin/clothes palettes */
+  var EMP = [
+    { role:'ceo',          fa:'مدیرعامل',    en:'CEO',          badge:'👑', c:'#f0b429', hair:'#3b3b3b', skin:'#f0c8a0' },
+    { role:'planner',      fa:'برنامه‌ریز',  en:'Planner',      badge:'📋', c:'#8b5cf6', hair:'#7c3aed', skin:'#e8b48a' },
+    { role:'orchestrator', fa:'ناظر',        en:'Orchestrator', badge:'🧭', c:'#3b82f6', hair:'#1d4ed8', skin:'#f5d0a9' },
+    { role:'executor',     fa:'مجری',        en:'Executor',     badge:'💻', c:'#22c55e', hair:'#14532d', skin:'#c68642' },
+    { role:'qa',           fa:'کیو‌ای',      en:'QA',           badge:'✅', c:'#14b8a6', hair:'#0f766e', skin:'#f0c8a0' },
+    { role:'security',     fa:'امنیت',       en:'Security',     badge:'🔒', c:'#ef4444', hair:'#111827', skin:'#e8b48a' },
+    { role:'rc',           fa:'کنترل منابع', en:'Resource Ctrl',badge:'💰', c:'#f97316', hair:'#9a3412', skin:'#f5d0a9' },
+    { role:'librarian',    fa:'کتابدار',     en:'Librarian',    badge:'📚', c:'#a16207', hair:'#713f12', skin:'#c68642' },
+    { role:'devops',       fa:'دواپس',       en:'DevOps',       badge:'🚀', c:'#6366f1', hair:'#3730a3', skin:'#f0c8a0' }
+  ];
+
+  var data = window.VCNP_DATA;
+  if (!data || !data.state || !Array.isArray(data.state.tasks)) {
+    $('empty').hidden = false; // graceful empty-state, zero console errors
+    return;
+  }
+  $('app').hidden = false;
+  $('gen-ts').textContent = 'generated: ' + (data.generated_at || '?');
+
+  /* ---------- build the 9 pixel employees ---------- */
+  EMP.forEach(function (e) {
+    var u = document.createElement('div');
+    u.className = 'unit st-working';
+    u.id = 'u-' + e.role;
+    u.innerHTML =
+      '<span class="bubble">🤔</span><span class="zzz">z Z</span>' +
+      '<div class="avatar" style="--c:' + e.c + ';--hair:' + e.hair + ';--skin:' + e.skin + '">' +
+        '<span class="hair"></span><span class="head"></span><span class="body"></span>' +
+        '<span class="badge">' + e.badge + '</span>' +
+        '<span class="tool">💼</span><span class="sleepy">😴</span>' +
+        '<span class="online" title="آنلاین | online"></span>' +
+      '</div>' +
+      '<div class="desk"><i class="lamp"></i></div>' +
+      '<span class="coffee">☕</span><span class="yawn" hidden>🥱</span>' +
+      '<span class="nametag">' + esc(e.fa) + ' · ' + esc(e.en) + '</span>' +
+      '<span class="mtag">در جلسه 🗣️</span>' +
+      '<div class="energy" title="انرژی | Energy"><span class="fill"></span></div>';
+    $('spot-' + e.role).appendChild(u);
+    e.unit = u; e.tag = u.querySelector('.nametag'); e.fill = u.querySelector('.energy .fill');
+    e.yawn = u.querySelector('.yawn'); e.energyBox = u.querySelector('.energy');
+    e.dot = u.querySelector('.online');
+  });
+
+  /* ---------- meeting-seat mini avatars (one per employee, hidden) ---------- */
+  var seatEls = document.querySelectorAll('#seats .seat');
+  EMP.forEach(function (e) {
+    var m = document.createElement('div');
+    m.className = 'mini';
+    m.style.cssText += '--c:' + e.c + ';--hair:' + e.hair + ';--skin:' + e.skin;
+    m.innerHTML = '<span class="chairback"></span>' +
+      '<span class="hair"></span><span class="head"></span><span class="body"></span>' +
+      '<span class="badge">' + e.badge + '</span>';
+    e.mini = m; // appended to a seat only when a meeting signal arrives
+  });
+
+  /* ---------- signals → states (defensive: unknown mood ⇒ working) ---------- */
+  function energyOf(lastEventTime, nowMs) {
+    if (!lastEventTime) return 20;
+    var ms = nowMs - Date.parse(lastEventTime);
+    if (!(ms >= 0)) return 20;
+    return Math.max(20, Math.round(100 - (ms / 60000) * (80 / 30))); // 100%→20% over 30min idle
+  }
+
+  var nowMs = Date.now();
+  var sigByRole = {};
+  (data.live && Array.isArray(data.live.roles) ? data.live.roles : []).forEach(function (r) {
+    if (r && r.role) sigByRole[r.role] = r;
+  });
+
+  var meetingRows = [];
+  EMP.forEach(function (e) {
+    var sig = sigByRole[e.role] || {};
+    var mood = KNOWN_MOOD[sig.mood] ? sig.mood : 'working';
+    var en = energyOf(sig.last_event_time, nowMs);
+    e.unit.className = 'unit st-' + mood;
+    e.tag.title = MOOD_FA[mood];
+    e.fill.style.width = en + '%';
+    e.fill.className = 'fill' + (en < 35 ? ' low' : en < 65 ? ' mid' : '');
+    e.yawn.hidden = en >= 35;
+    e.energyBox.title = 'انرژی: ' + en + '٪ · آخرین رویداد: ' + (sig.last_event_time || '—') +
+      ' | Energy ' + en + '%, last event: ' + (sig.last_event_time || '-');
+    if (sig.active_role && mood !== 'sleeping') e.dot.style.opacity = 1; // blinking online dot
+    if (mood === 'meeting') meetingRows.push(e);
+  });
+
+  /* meeting: avatar ABSSENT from desk → seated at the round table (class swap) */
+  meetingRows.forEach(function (e, i) {
+    e.unit.classList.add('away');
+    if (i < seatEls.length) {
+      var s = seatEls[i];
+      s.appendChild(e.mini);
+      s.classList.add('here');
+      e.seat = s;
+    }
+  });
+
+  /* ---------- celebration: done-ish event within last 60s → 3s confetti ---------- */
+  function burst(anchor) {
+    var c = document.createElement('div');
+    c.className = 'confetti';
+    var cols = ['#fbbf24','#22c55e','#3b82f6','#ef4444','#a855f7','#14b8a6'];
+    for (var i = 0; i < 16; i++) {
+      var p = document.createElement('i');
+      var ang = Math.random() * Math.PI * 2, dist = 26 + Math.random() * 34;
+      p.style.setProperty('--i', i);
+      p.style.setProperty('--dx', Math.round(Math.cos(ang) * dist) + 'px');
+      p.style.setProperty('--dy', Math.round(Math.sin(ang) * dist - 20) + 'px');
+      p.style.setProperty('--c', cols[i % cols.length]);
+      c.appendChild(p);
+    }
+    var star = document.createElement('b');
+    star.textContent = '🎉';
+    c.appendChild(star);
+    anchor.appendChild(c);
+    setTimeout(function () { if (c.parentNode) c.parentNode.removeChild(c); }, 3000);
+  }
+  var celebrated = {};
+  (Array.isArray(data.recent_events) ? data.recent_events : []).forEach(function (ev) {
+    if (!ev || !ev.ts || !ev.actor) return;
+    var age = nowMs - Date.parse(ev.ts);
+    if (!(age >= 0 && age <= 60000)) return;
+    if (!CELEBRATE_RE.test(String(ev.action || ''))) return;
+    if (celebrated[ev.actor]) return;
+    celebrated[ev.actor] = true;
+    EMP.forEach(function (e) {
+      if (e.role === ev.actor) burst(e.seat || e.unit);
+    });
+  });
+
+  /* ---------- wall screen ticker: real event feed scrolls on the screen ---------- */
+  var tickParts = ['VCNP OFFICE // LIVE'];
+  (Array.isArray(data.recent_events) ? data.recent_events : []).slice(-8).forEach(function (e) {
+    tickParts.push((e.actor || '?') + ':' + (e.action || '') + (e.task_id ? '#' + e.task_id : ''));
+  });
+  $('ticker').textContent = tickParts.join('  ★  ') + '  ★  ';
+
+  /* ---------- status sidebar ---------- */
+  var st = data.state;
+  var proj = st.project || {};
+  var pct = proj.overall_progress || 0;
+  $('sb-fill').style.width = pct + '%';
+  $('sb-bar').setAttribute('aria-valuenow', pct);
+  $('sb-plabel').textContent = 'پیشرفت کلی: ' + pct + '٪ از ' + st.tasks.length +
+    ' تسک · Overall: ' + pct + '% of ' + st.tasks.length + ' tasks';
+
+  var COLUMNS = [
+    ['todo', 'انجام نشده', 'Todo', '#94a3b8'],
+    ['doing', 'در حال انجام', 'Doing', '#3b82f6'],
+    ['awaiting_orchestrator', 'انتظار ناظر', 'Awaiting', '#a855f7'],
+    ['review', 'بازبینی', 'Review', '#14b8a6'],
+    ['blocked', 'مسدود', 'Blocked', '#ef4444'],
+    ['done', 'انجام شده', 'Done', '#22c55e']
+  ];
+  var counts = {};
+  COLUMNS.forEach(function (c) { counts[c[0]] = 0; });
+  st.tasks.forEach(function (t) {
+    if (Object.prototype.hasOwnProperty.call(counts, t.status)) counts[t.status]++;
+  });
+  $('sb-counts').innerHTML = COLUMNS.map(function (c) {
+    return '<span class="cnt"><span class="dot" style="background:' + c[3] + '"></span>' +
+      esc(c[1]) + ' <span style="color:var(--mut)">' + esc(c[2]) + '</span>' +
+      '<span class="n">' + counts[c[0]] + '</span></span>';
+  }).join('');
+
+  var evHtml = '';
+  (Array.isArray(data.recent_events) ? data.recent_events : []).slice(-10).reverse()
+    .forEach(function (e) {
+      evHtml += '<li><span class="ev-ts">' + esc(String(e.ts || '').replace('T', ' ').slice(0, 16)) +
+        '</span><span class="ev-actor">' + esc(e.actor || '?') + '</span>' +
+        '<span class="ev-action">' + esc(e.action || '') + (e.task_id ? ' · ' + esc(e.task_id) : '') +
+        '</span></li>';
+    });
+  $('sb-events').innerHTML = evHtml ||
+    '<li><em>رویدادی ثبت نشده — گزارشی تولید نشده است</em></li>';
+
+  /* ---------- day/night tint + wall clock hands (local clock, one interval) ---------- */
+  var DN_FA = { day: 'روز ☀️', dusk: 'غروب 🌇', night: 'شب 🌙', dawn: 'سحر 🌅' };
+  function tick() {
+    var d = new Date();
+    var h = d.getHours() + d.getMinutes() / 60, night, warm, label;
+    if (h >= 8 && h < 18) { night = 0; warm = 0; label = 'day'; }
+    else if (h >= 21 || h < 5) { night = 1; warm = 0; label = 'night'; }
+    else if (h >= 5 && h < 8) { night = 1 - (h - 5) / 3; warm = 1 - Math.abs(h - 6.5) / 1.5; label = 'dawn'; }
+    else { night = (h - 18) / 3; warm = 1 - Math.abs(h - 19.5) / 1.5; label = 'dusk'; }
+    warm = Math.max(0, Math.min(1, warm));
+    var root = document.documentElement.style;
+    root.setProperty('--night', night.toFixed(3));
+    root.setProperty('--warm', warm.toFixed(3));
+    $('clock').textContent = (d.getHours() < 10 ? '0' : '') + d.getHours() + ':' +
+      (d.getMinutes() < 10 ? '0' : '') + d.getMinutes();
+    $('dn-label').textContent = DN_FA[label];
+    $('clk-hh').style.transform = 'rotate(' + ((d.getHours() % 12) * 30 + d.getMinutes() * 0.5) + 'deg)';
+    $('clk-mh').style.transform = 'rotate(' + (d.getMinutes() * 6) + 'deg)';
+  }
+  tick();
+  setInterval(tick, 60000);
+
+  /* ---------- integer scaling of the 640x360 pixel scene (never blurred) ---------- */
+  var BASE_W = 640, BASE_H = 360;
+  function fit() {
+    var avail = document.querySelector('.stage').clientWidth - 4;
+    var s = avail >= BASE_W ? Math.floor(avail / BASE_W) : avail / BASE_W;
+    if (s > 3) s = 3; if (s < 0.5) s = 0.5;
+    $('fit').style.transform = 'scale(' + s + ')';
+    var o = $('fit-outer');
+    o.style.width = Math.round(BASE_W * s) + 'px';
+    o.style.height = Math.round(BASE_H * s) + 'px';
+  }
+  fit();
+  window.addEventListener('resize', fit);
+
+  /* ---------- controls ---------- */
+  $('btn-refresh').addEventListener('click', function () { location.reload(); });
+  $('btn-side').addEventListener('click', function () {
+    var aside = $('sidebar'), open = aside.hidden;
+    aside.hidden = !open;
+    document.querySelector('main').classList.toggle('noside', !open);
+    this.setAttribute('aria-expanded', String(open));
+    fit();
+  });
+})();
+</script>
+
+</body>
+</html>
