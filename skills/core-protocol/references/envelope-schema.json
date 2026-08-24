@@ -1,0 +1,123 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vcnp.office/schemas/handoff-envelope-v1.json",
+  "title": "VCNP Handoff Envelope v1",
+  "description": "Validates BOTH envelope types from core/protocol.md: Task Brief (Orchestrator -> Executor) and Result Report (Executor -> Orchestrator). Producers SHOULD include \"schema_version\": \"1.0\" (protocol section 7). Token fields are forbidden: additionalProperties=false rejects any field outside the contracts.",
+  "oneOf": [
+    { "$ref": "#/$defs/taskBrief" },
+    { "$ref": "#/$defs/resultReport" }
+  ],
+  "$defs": {
+    "taskBrief": {
+      "type": "object",
+      "title": "Task Brief (Orchestrator -> Executor)",
+      "additionalProperties": false,
+      "required": [
+        "task_id",
+        "title",
+        "task_class",
+        "context_refs",
+        "acceptance_criteria",
+        "budget_tokens",
+        "priority",
+        "definition_of_done"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "1.0",
+          "description": "SHOULD be present per protocol section 7."
+        },
+        "task_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Unique id; T-NNN convention recommended (pattern ^T-[0-9]{3,}$)."
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Short, human-readable."
+        },
+        "task_class": {
+          "enum": ["C0", "C1", "C2", "C3", "C4"],
+          "description": "Routing matrix class (plan section 8)."
+        },
+        "context_refs": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Workspace-relative paths + anchors; MAY be []. Workers receive ONLY the brief + referenced files."
+        },
+        "acceptance_criteria": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Testable statements; QA judges against exactly these."
+        },
+        "budget_tokens": {
+          "type": "integer",
+          "exclusiveMinimum": 0
+        },
+        "priority": {
+          "enum": ["low", "medium", "high", "critical"]
+        },
+        "definition_of_done": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Explicit done condition, e.g. 'QA approved + board updated'."
+        }
+      }
+    },
+    "resultReport": {
+      "type": "object",
+      "title": "Result Report (Executor -> Orchestrator)",
+      "additionalProperties": false,
+      "required": [
+        "task_id",
+        "status",
+        "progress_percent",
+        "artifacts",
+        "blockers",
+        "notes_for_qa"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "1.0",
+          "description": "SHOULD be present per protocol section 7."
+        },
+        "task_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Must match the originating brief."
+        },
+        "status": {
+          "enum": ["done", "blocked", "needs_input"]
+        },
+        "progress_percent": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "artifacts": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Produced/changed paths, workspace-relative."
+        },
+        "blockers": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Empty when done; concrete when blocked/needs_input."
+        },
+        "notes_for_qa": {
+          "type": "string",
+          "description": "May be empty string."
+        }
+      },
+      "if": {
+        "properties": { "status": { "const": "done" } },
+        "required": ["status"]
+      },
+      "then": {
+        "properties": { "blockers": { "maxItems": 0 } }
+      }
+    }
+  }
+}

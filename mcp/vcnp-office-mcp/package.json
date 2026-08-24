@@ -1,0 +1,15 @@
+{
+  "name": "vcnp-office-mcp",
+  "version": "1.0.0",
+  "description": "VCNP Vibe-Office MCP server — board, ledger, model router, telemetry, llm_batch. Zero npm dependencies.",
+  "main": "src/server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node test/smoke.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "private": true
+}

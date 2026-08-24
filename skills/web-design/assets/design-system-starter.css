@@ -1,0 +1,95 @@
+/* ============================================================
+   VCNP Design System Starter
+   Tokens only — components consume these variables.
+   Logical properties throughout => RTL-ready out of the box.
+   ============================================================ */
+
+:root {
+  /* ---- Color: primitives ---- */
+  --color-brand-50:  #eef4ff;
+  --color-brand-100: #dce7ff;
+  --color-brand-500: #3b74f0;
+  --color-brand-600: #2b5cd6;
+  --color-brand-700: #2148ab;
+
+  --color-neutral-0:   #ffffff;
+  --color-neutral-50:  #f7f8fa;
+  --color-neutral-100: #eef0f4;
+  --color-neutral-300: #cdd3dd;
+  --color-neutral-500: #6b7484;
+  --color-neutral-700: #3a4150;
+  --color-neutral-900: #171b24;
+
+  --color-success: #1a9e5c;
+  --color-warning: #d98a00;
+  --color-danger:  #d64545;
+  --color-info:    #2b7fd6;
+
+  /* ---- Color: semantic (swap per theme) ---- */
+  --bg-page:        var(--color-neutral-50);
+  --bg-surface:     var(--color-neutral-0);
+  --bg-inverse:     var(--color-neutral-900);
+  --text-primary:   var(--color-neutral-900);
+  --text-secondary: var(--color-neutral-500);
+  --text-on-inverse: var(--color-neutral-50);
+  --border-subtle:  var(--color-neutral-300);
+  --accent:         var(--color-brand-500);
+  --accent-strong:  var(--color-brand-600);
+
+  /* ---- Spacing scale (4px base) ---- */
+  --space-3xs: 2px;
+  --space-2xs: 4px;
+  --space-xs:  8px;
+  --space-s:   12px;
+  --space-m:   16px;
+  --space-l:   24px;
+  --space-xl:  32px;
+  --space-2xl: 48px;
+  --space-3xl: 64px;
+
+  /* ---- Type scale (~1.25 ratio, fluid) ---- */
+  --font-sans: "Vazirmatn", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-mono: ui-monospace, "Cascadia Code", Consolas, monospace;
+
+  --text-xs:   clamp(0.75rem, 0.72rem + 0.15vw, 0.8rem);
+  --text-sm:   clamp(0.875rem, 0.85rem + 0.15vw, 0.95rem);
+  --text-base: clamp(1rem, 0.96rem + 0.2vw, 1.075rem);
+  --text-lg:   clamp(1.125rem, 1.05rem + 0.35vw, 1.31rem);
+  --text-xl:   clamp(1.35rem, 1.2rem + 0.6vw, 1.73rem);
+  --text-2xl:  clamp(1.7rem, 1.4rem + 1vw, 2.3rem);
+  --text-3xl:  clamp(2.1rem, 1.6rem + 1.6vw, 3.1rem);
+
+  --leading-tight: 1.2;
+  --leading-normal: 1.6;
+
+  /* ---- Radii & shadows ---- */
+  --radius-s: 6px;
+  --radius-m: 10px;
+  --radius-l: 16px;
+  --radius-pill: 999px;
+  --shadow-1: 0 1px 2px rgb(23 27 36 / 0.08);
+  --shadow-2: 0 4px 12px rgb(23 27 36 / 0.12);
+
+  /* ---- Layout ---- */
+  --container-max: 72rem;
+  --gutter: var(--space-l);
+}
+
+/* ---- Breakpoints (mobile-first, use in media queries):
+   sm >= 640px | md >= 768px | lg >= 1024px | xl >= 1280px ---- */
+
+/* ---- RTL: logical properties mirror automatically.
+   Override only truly directional choices here. ---- */
+[dir="rtl"] {
+  --font-sans: "Vazirmatn", "Segoe UI", Tahoma, sans-serif;
+}
+
+/* ---- Reduced motion ---- */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
