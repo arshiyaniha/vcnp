@@ -175,11 +175,22 @@ function writeDashboardData(state, live, events) {
     action: e.action,
     task_id: e.task_id,
   }));
+  /* Phase 4 (§1.4): report_generate persists the composed payload's REAL
+   * work/meetings projections into the static snapshot too, so file://
+   * dashboards show desk cards + meetings with the server OFF. Phase 5 adds
+   * the same parity for the تلفنخانه window. Lazy requires: work-core /
+   * phone-core import this module for ROLES (load-time cycle avoided exactly
+   * like hooks/mirrors.js). */
+  const work = require('../live/work-core');
+  const phone = require('../live/phone-core');
   const payload = {
     state,
     live,
     generated_at: new Date().toISOString(),
     recent_events,
+    work: work.projectWork(events, state),
+    meetings: work.projectMeetings(events),
+    phone: phone.projectPhone(events),
   };
   store.atomicWriteText(DASHBOARD_DATA_FILE, 'window.VCNP_DATA = ' + JSON.stringify(payload) + ';\n');
 }

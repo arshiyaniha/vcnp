@@ -254,6 +254,11 @@ aside h2 em{font-style:normal;font-family:var(--mn);font-size:9px;color:#6d64a8;
 <noscript><p style="text-align:center;padding:30px">این داشبورد برای انیمیشن به جاوااسکریپت نیاز دارد.</p></noscript>
 
 <script src="../office/dashboard-data.js"></script>
+<!-- Live-office plan §5.3: shared normalize/store modules for the SSE
+     bootstrap patch below. Loaded but inert unless the bootstrap connects
+     — file:// pages keep working exactly as before if either 404s. -->
+<script src="../office/live/assets/vcnp-normalize.js"></script>
+<script src="../office/live/assets/vcnp-store-client.js"></script>
 <script>
 (function(){
 'use strict';
@@ -1822,6 +1827,27 @@ document.getElementById('btnSide').addEventListener('click',function(){
   this.textContent = hide?'نمایش پنل':'پنل وضعیت';
   setTimeout(fit,0);
 });
+
+/* ---------------- live-office plan §5.3: minimal SSE bootstrap patch ----
+   window.VCNP_APPLY(normalized) re-shapes a VCNP.normalize() result back
+   into the window.VCNP_DATA contract readData()/loadAndRender() already
+   consume, then reuses that EXACT inject path — no parallel render logic.
+   If EventSource/fetch are unavailable (file://, server off) VCNP_STORE
+   never calls back and the existing 45s refresh() loop above remains the
+   sole mechanism (zero regression). */
+window.VCNP_APPLY=function(n){
+  if(!n)return;
+  window.VCNP_DATA={
+    state:{tasks:n.tasks,project:n.project},
+    live:{roles:Object.keys(n.roles).map(function(r){var x=n.roles[r];
+      return {role:r,active_role:x.active,last_event_time:x.last_event_time,mood:x.mood,energy_hint:x.energy};})},
+    generated_at:n.meta.generated_ts,recent_events:n.meta.recent_events
+  };
+  loadAndRender();
+};
+if(typeof VCNP_STORE!=='undefined'&&typeof VCNP!=='undefined'){
+  VCNP_STORE.connect({onPayload:function(p){ if(p) VCNP_APPLY(VCNP.normalize(p)); }});
+}
 })();
 </script>
 </body>

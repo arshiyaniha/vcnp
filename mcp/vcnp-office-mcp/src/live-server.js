@@ -13,7 +13,7 @@
  *            → 7788 default; 0 = ephemeral (useful for tests)
  *   routes   GET /api/data · GET /api/stream (SSE) · GET /healthz
  *            POST /api/message (Phase 3 chat) · GET /api/inbox (Phase 3)
- *            POST /api/phone → 501 stub until Phase 5
+ *            POST /api/phone + GET /api/audio/<file> (Phase 5 تلفنخانه)
  *            static: office/ then templates/ (read-only, containment-checked)
  *   writes   confined to office/ (mirror regen + .mirrors-stamp only)
  *
@@ -29,6 +29,7 @@ const path = require('path');
 const store = require('./store');
 const compose = require('./live/compose');
 const inboxCore = require('./live/inbox-core');
+const phoneCore = require('./live/phone-core');
 const { createSseHub } = require('./live/sse');
 const { startWatcher } = require('./live/watcher');
 const { createHttpApi } = require('./live/http-api');
@@ -64,6 +65,9 @@ async function main() {
     // Phase 3 chat writers — same code path as the MCP inbox tools (§3.1).
     postMessage: (args) => inboxCore.postMessage(args),
     inboxProject: (opts) => inboxCore.projectInbox(store.readEvents(), opts),
+    // Phase 5 telephone exchange — the ONE write path shared with the CLI.
+    postPhoneCall: (args) => phoneCore.receiveCall(args),
+    phoneAudioDir: phoneCore.phoneDir(),
     staticRoots: [store.OFFICE_DIR, path.join(store.WORKSPACE, 'templates')],
   });
 

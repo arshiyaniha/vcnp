@@ -47,20 +47,41 @@ function nextMessageId(events) {
 /**
  * Pending = latest-per-thread view over message_posted events that have no
  * later message_answered with the same reply_to. Oldest-first (§3.1).
+ * Phase 5: phone-channel items additionally carry an `audio` descriptor
+ * ({call_id, audio_ref, audio_url, has_transcript, transcript}) resolved from
+ * the paired phone_call_received — a CEO session sees playable audio straight
+ * from inbox_list / GET /api/inbox (plan §6.3 acceptance).
  */
 function projectInbox(events, opts) {
   const o = opts || {};
   const answerFor = new Map(); // reply_to(event_id) -> answer event (latest wins)
+  const callByPaired = new Map(); // paired_message_id -> phone_call_received
   for (const ev of events) {
-    if (ev && ev.action === 'message_answered' && typeof ev.reply_to === 'string') {
+    if (!ev) continue;
+    if (ev.action === 'message_answered' && typeof ev.reply_to === 'string') {
       answerFor.set(ev.reply_to, ev);
+    } else if (ev.action === 'phone_call_received' && typeof ev.paired_message_id === 'string') {
+      callByPaired.set(ev.paired_message_id, ev);
     }
   }
+  const audioOf = (ev) => {
+    if ((ev.channel || 'web') !== 'phone') return null;
+    const call = callByPaired.get(ev.message_id);
+    if (!call || typeof call.audio_ref !== 'string') return null;
+    return {
+      call_id: call.call_id,
+      has_transcript: call.has_transcript === true,
+      transcript: call.transcript === undefined ? null : call.transcript,
+      audio_ref: call.audio_ref,
+      audio_url: '/api/audio/' + String(call.audio_ref).split('/').pop(),
+    };
+  };
   const pending = [];
   const answered = [];
   for (const ev of events) {
     if (!ev || ev.action !== 'message_posted') continue;
     const ans = answerFor.get(ev.event_id) || null;
+    const audio = audioOf(ev);
     const item = {
       message_id: ev.message_id,
       from: ev.actor || 'user',
@@ -69,6 +90,7 @@ function projectInbox(events, opts) {
       ts: ev.ts,
       channel: ev.channel || 'web',
       event_id: ev.event_id,
+      ...(audio ? { audio } : {}),
     };
     if (!ans) {
       if (!o.role || o.role === ev.to_role) pending.push(item);
@@ -82,6 +104,7 @@ function projectInbox(events, opts) {
         actor: ans.actor,
         text: ans.text,
         ts: ans.ts,
+        ...(audio ? { audio } : {}),
       });
     }
   }

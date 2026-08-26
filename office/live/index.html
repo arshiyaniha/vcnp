@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>VCNP Vibe-Office</title>
+<!--
+  Style switcher shell (live-office plan §5.1/§5.3/D4). Reads ?style=pixel|
+  studio, remembers the choice in localStorage, and embeds the chosen page
+  in an <iframe> — each child loads its own ../dashboard-data.js snapshot
+  with a plain <script src>, so file:// keeps working exactly as before
+  (no data is fetched or duplicated here in the shell).
+-->
+<style>
+:root{
+  --paper:#eef1f7; --ink:#151b2b; --ink2:#3d4763; --mut:#7b869f; --line:#cfd7e6; --card:#ffffffd9;
+  --fa:"Vazirmatn","Segoe UI",Tahoma,system-ui,sans-serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;overflow:hidden;background:var(--paper);color:var(--ink);font-family:var(--fa)}
+.bar{position:fixed;top:0;left:0;right:0;height:48px;z-index:5;display:flex;align-items:center;gap:10px;
+  padding:0 14px;background:var(--card);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+.bar .brand{font-size:13px;font-weight:700}
+.bar .grow{flex:1}
+.switch{display:flex;gap:4px;background:#ffffffb0;border:1px solid var(--line);border-radius:999px;padding:3px}
+.switch button{border:0;background:transparent;color:var(--ink2);font-family:inherit;font-size:12px;
+  padding:6px 14px;border-radius:999px;cursor:pointer}
+.switch button.on{background:var(--ink);color:#fff}
+.stage{position:fixed;top:48px;left:0;right:0;bottom:0}
+.stage iframe{width:100%;height:100%;border:0;display:block;background:var(--paper)}
+</style>
+</head>
+<body>
+<div class="bar">
+  <div class="brand">VCNP Vibe-Office</div>
+  <div class="grow"></div>
+  <div class="switch" role="group" aria-label="سوییچ سبک نمایش">
+    <button id="btnPixel" type="button">سبک پیکسلی / Pixel</button>
+    <button id="btnStudio" type="button">سبک استودیو / Studio</button>
+  </div>
+</div>
+<div class="stage"><iframe id="frame" title="VCNP Vibe-Office"></iframe></div>
+
+<script>
+(function(){
+  'use strict';
+  var STORAGE_KEY = 'vcnp_office_style';
+  var STYLES = {
+    pixel: '../../templates/dashboard-pixel.html',
+    studio: 'studio.html'
+  };
+
+  function readStyle(){
+    try {
+      var q = new URLSearchParams(location.search).get('style');
+      if (q === 'pixel' || q === 'studio') return q;
+    } catch (e) { /* URLSearchParams unavailable — fall through */ }
+    try {
+      var saved = localStorage.getItem(STORAGE_KEY);
+      if (saved === 'pixel' || saved === 'studio') return saved;
+    } catch (e) { /* storage blocked (file://, private mode) */ }
+    return 'pixel';
+  }
+
+  function setStyle(style, pushUrl){
+    var frame = document.getElementById('frame');
+    frame.src = STYLES[style] || STYLES.pixel;
+    document.getElementById('btnPixel').classList.toggle('on', style === 'pixel');
+    document.getElementById('btnStudio').classList.toggle('on', style === 'studio');
+    try { localStorage.setItem(STORAGE_KEY, style); } catch (e) { /* best effort */ }
+    if (pushUrl && history.replaceState) {
+      var url = new URL(location.href);
+      url.searchParams.set('style', style);
+      history.replaceState(null, '', url);
+    }
+  }
+
+  document.getElementById('btnPixel').addEventListener('click', function(){ setStyle('pixel', true); });
+  document.getElementById('btnStudio').addEventListener('click', function(){ setStyle('studio', true); });
+
+  setStyle(readStyle(), false);
+})();
+</script>
+</body>
+</html>

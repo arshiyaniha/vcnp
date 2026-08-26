@@ -155,7 +155,11 @@ NEVER edit the ledger or mirrors by hand.
 1. **Session start** — first MCP call of every session:
    `event_log { actor: "<role>", action: "session_lifecycle", detail: { phase: "start", session_id: "<id>" } }`
 2. **Real work** — one event per meaningful unit, with real artifact paths:
-   `event_log { actor: "<role>", action: "work_logged", detail: { task_id: "T-NNN", action_summary: "...", artifact_refs: ["<workspace-relative path>"] } }`
+   `work_log { action_summary: "...", artifact_refs: ["<workspace-relative path>"], task_id?: "T-NNN", as_role?: "<role>" }`
+   (LIVE since Phase 4; the raw equivalent
+   `event_log { actor: "<role>", action: "work_logged", detail: { ... } }` stays valid.)
+   Real meetings go through `meeting_start { topic, participants[2..9], reason, task_id? }` /
+   `meeting_end { outcome_summary? }` — one active meeting at a time; only its starter ends it.
 3. **Status channel** — board status changes go ONLY through `task_create` / `task_update` / `task_assign`.
 4. **Session end** — last MCP call of every session: same as (1) with `phase: "end"`.
 5. **Inbox duty (LIVE since Phase 3)** — at session start, after every milestone, and before

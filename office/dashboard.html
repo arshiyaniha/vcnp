@@ -135,6 +135,27 @@ main.solo{grid-template-columns:0 minmax(0,1fr)}
 .coff{font-size:9.5px;color:var(--mut);line-height:1.7}
 .coff code{font-family:var(--mn);direction:ltr;display:inline-block;color:#8d84c9}
 
+/* --- Phase 5 تلفنخانه (plan §6) --- */
+.phonebox{display:grid;gap:6px}
+.phrow{display:flex;gap:5px;flex-wrap:wrap;align-items:center}
+.phbtn{display:inline-flex;align-items:center;gap:6px;background:var(--ink);color:var(--txt);
+  border:0;padding:6px 10px;font-family:inherit;font-size:10.5px;cursor:pointer;
+  box-shadow:inset 0 0 0 2px var(--line)}
+.phbtn:hover{box-shadow:inset 0 0 0 2px var(--gold)}
+.phbtn.pri{color:#0c0a18;background:var(--gold);font-weight:700}
+.phbtn.danger{color:#fff;background:#a92639;font-weight:700}
+.phbtn:disabled{opacity:.45;cursor:not-allowed}
+.phtime{font-family:var(--mn);font-size:11px;color:var(--coral);direction:ltr}
+.phlive{font-size:9.5px;color:var(--mut);line-height:1.7;min-height:14px}
+.phlive b{color:#cfc8ee;font-weight:400}
+.phlive i{color:#8a83c0;font-style:normal}
+.phnt{display:inline-block;padding:0 5px;font-size:8px;line-height:13px;
+  color:#e8e4f8;background:#8a83c0}
+.phcall{border-top:1px solid var(--line);padding-top:5px;display:grid;gap:3px}
+.phcall audio{width:100%;height:28px}
+.phmeta{font-size:9px;color:var(--mut);display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.phtx{font-size:9.5px;line-height:1.6;color:var(--txt)}
+
 /* ---------- legend ---------- */
 .legend{display:flex;flex-wrap:wrap;gap:4px;margin-top:2px}
 .lg{font-size:10px;color:#d9d3f5;background:var(--panel);padding:2px 8px;box-shadow:inset 0 0 0 2px #3b317080}
@@ -244,6 +265,10 @@ aside h2 em{font-style:normal;font-family:var(--mn);font-size:9px;color:#6d64a8;
 
     <h2>آخرین رویدادها <em>ACTIVITY</em></h2>
     <ul class="ev" id="events"></ul>
+
+    <h2>تلفنخانه <em>TELEPHONE</em></h2>
+    <div class="phonebox" id="phoneBox"
+         aria-label="تلفنخانه — ضبط پیام صوتی برای مدیر و پخش تماس‌های اخیر"></div>
 
     <h2>راهنمای نشانه‌ها <em>LEGEND</em></h2>
     <div class="legend" id="legend"></div>
@@ -458,12 +483,12 @@ var STATUSES=[
 ];
 var WIN_RE=/done|complete|deploy|merge|pass|approv|success|finish/i;
 var CHAT_EMPTY={messages:[],inbox:{total_pending:0,pending_by_role:{}},session_active:{by_role:{},threshold_min:30}};
-var D={ok:false,roles:{},tasks:[],counts:{},events:[],progress:0,gen:'',chat:CHAT_EMPTY};
+var D={ok:false,roles:{},tasks:[],counts:{},events:[],progress:0,gen:'',chat:CHAT_EMPTY,work:{},meeting:null,meetingsRecent:[],phone:{recent:[]}};
 var everOk=false, fetchFailed=false;
 
 function readData(){
   var d=window.VCNP_DATA;
-  var out={ok:false,roles:{},tasks:[],counts:{},events:[],progress:0,gen:'',chat:CHAT_EMPTY};
+  var out={ok:false,roles:{},tasks:[],counts:{},events:[],progress:0,gen:'',chat:CHAT_EMPTY,work:{},meeting:null,meetingsRecent:[],phone:{recent:[]}};
   STATUSES.forEach(function(s){out.counts[s[0]]=0;});
   try{
     if(!d||typeof d!=='object')return out;
@@ -517,6 +542,72 @@ function readData(){
         if(typeof ch.session_active.threshold_min==='number'&&isFinite(ch.session_active.threshold_min))
           out.chat.session_active.threshold_min=ch.session_active.threshold_min;
       }
+    }
+    /* Phase 4 (§7.1): per-desk REAL focus data — task + artifact paths.
+       Tolerant of absent/legacy payloads; nothing shown unless composed. */
+    var wk=d.work;
+    if(wk&&typeof wk==='object'&&wk.by_role&&typeof wk.by_role==='object'){
+      Object.keys(wk.by_role).forEach(function(r){
+        var dsk=wk.by_role[r];
+        if(!dsk||typeof dsk!=='object'||!r)return;
+        var t=null;
+        if(dsk.task&&typeof dsk.task==='object'){
+          t={task_id:String(dsk.task.task_id||''),title:String(dsk.task.title||''),
+             status:String(dsk.task.status||''),
+             progress_percent:(typeof dsk.task.progress_percent==='number'&&isFinite(dsk.task.progress_percent))
+               ?Math.max(0,Math.min(100,Math.round(dsk.task.progress_percent))):0};
+        }
+        var lw=null;
+        if(dsk.last_work_logged&&typeof dsk.last_work_logged==='object'){
+          lw={ts:String(dsk.last_work_logged.ts||''),
+              action_summary:String(dsk.last_work_logged.action_summary||''),
+              artifact_refs:Array.isArray(dsk.last_work_logged.artifact_refs)
+                ?dsk.last_work_logged.artifact_refs.filter(function(a){return typeof a==='string'&&a;}).slice(0,3):[]};
+        }
+        out.work[r]={
+          task:t,
+          artifacts:Array.isArray(dsk.artifacts)?dsk.artifacts.filter(function(a){return typeof a==='string'&&a;}).slice(0,3):[],
+          last_work_logged:lw};
+      });
+    }
+    /* Phase 4 (§7.2): THE active meeting (latest start without an end) and
+       the recent ended-meetings window — straight from compose truth. */
+    var mt=d.meetings;
+    if(mt&&typeof mt==='object'){
+      if(mt.active&&typeof mt.active==='object'&&typeof mt.active.meeting_id==='string'){
+        out.meeting={
+          meeting_id:mt.active.meeting_id,
+          topic:String(mt.active.topic||''),
+          reason:String(mt.active.reason||''),
+          participants:Array.isArray(mt.active.participants)?mt.active.participants.filter(function(p){return typeof p==='string';}):[],
+          agenda_task_ids:Array.isArray(mt.active.agenda_task_ids)?mt.active.agenda_task_ids.filter(function(x){return typeof x==='string';}):[],
+          started_ts:String(mt.active.started_ts||'')};
+      }
+      if(Array.isArray(mt.recent)){
+        out.meetingsRecent=mt.recent.slice(0,5).map(function(m){
+          return (m&&typeof m==='object')?{
+            meeting_id:String(m.meeting_id||''),topic:String(m.topic||''),
+            ended_ts:String(m.ended_ts||''),
+            outcome_summary:(m.outcome_summary==null)?null:String(m.outcome_summary)}:null;
+        }).filter(Boolean);
+      }
+    }
+    /* Phase 5 (§1.4/§6): تلفنخانه window — recent calls already joined
+       server-side with their paired-message answer status. Tolerant of
+       legacy snapshots; nothing shown unless really composed. */
+    var ph=d.phone;
+    if(ph&&typeof ph==='object'&&Array.isArray(ph.recent)){
+      out.phone={recent:ph.recent.filter(function(c){return c&&typeof c==='object';}).slice(0,8)
+        .map(function(c){
+          return {call_id:String(c.call_id||''),
+                  ts:String(c.ts||''),
+                  transcript:(c.transcript==null)?null:String(c.transcript),
+                  has_transcript:c.has_transcript===true,
+                  audio_url:(typeof c.audio_url==='string')?c.audio_url:'',
+                  duration_ms:(typeof c.duration_ms==='number'&&isFinite(c.duration_ms))?c.duration_ms:0,
+                  answered:c.answered===true,
+                  answered_by:(c.answered_by==null)?null:String(c.answered_by)};
+        })};
     }
   }catch(e){ out.ok=false; }
   return out;
@@ -884,7 +975,29 @@ function meetingStatic(){
    falling back to the scrolling ticker strips when none exist */
 function drawMeetingScreen(){
   var sx=236,sy=156,sw=132,sh=22;
-  if(MEETTASKS.length){
+  if(MEETINFO&&(MEETINFO.live||MEETINFO.stale)){
+    /* REAL meeting on the wall screen (§7.2): topic + agenda task ids with
+       progress bars + pending-inbox counter; «interrupted» tag once a start
+       has been open >10 min with no meeting_ended (honest crash-safety). */
+    g.save(); g.beginPath(); g.rect(sx+2,sy+2,sw-4,sh-4); g.clip();
+    var tp=String(MEETINFO.topic||'').toUpperCase().replace(/[^ -~]/g,'');
+    txt((tp||('MEETING/'+String(MEETINFO.reason||'EXPLICIT').toUpperCase())).slice(0,30),sx+4,sy+4,C.scrOn,1);
+    if(MEETTASKS.length){
+      for(var i=0;i<Math.min(2,MEETTASKS.length);i++){
+        var at=MEETTASKS[i], ay=sy+11+i*5;
+        var aid=String(at.task_id||'TASK').toUpperCase().replace(/[^ -~]/g,'').slice(0,11)||'TASK';
+        txt(aid,sx+4,ay,C.scrOn,1);
+        var apr=progressOf(at);
+        px(sx+50,ay+1,62,2,mix(C.screen,'#ffffff',.10));
+        px(sx+50,ay+1,Math.max(1,Math.round(62*apr/100)),2,C.scrOn);
+        txt(String(apr),sx+115,ay,mix(C.scrOn,C.screen,.35),1);
+      }
+    }
+    var pend=(D.chat&&D.chat.inbox&&D.chat.inbox.total_pending)||0;
+    if(pend>0) txt(pend+'MSG',sx+sw-22,sy+16,'#ffd48a',1);
+    if(MEETINFO.stale) txt(('INTERRUPTED '+MEETINFO.mins+'M').slice(0,18),sx+4,sy+16,'#ffb347',1);
+    g.restore();
+  } else if(MEETTASKS.length){
     for(var i=0;i<MEETTASKS.length;i++){
       var t=MEETTASKS[i], y=sy+3+i*6;
       var id=String(t.task_id||'TASK').toUpperCase().replace(/[^ -~]/g,'').slice(0,11)||'TASK';
@@ -909,6 +1022,33 @@ function drawMeetingScreen(){
     g.restore();
   }
   if(!REDUCED&&fr%23===0){g.globalAlpha=.12;px(sx,sy,sw,sh,'#ffffff');g.globalAlpha=1;}
+}
+
+/* Phase 4 (§7.1): artifact/code cards floating at each desk — REAL focus
+   data from payload.work only (task id + progress + up to 2 artifact file
+   names). Paths/titles ONLY: no file content is ever fetched or faked. */
+function baseName(p){var s=String(p||'').replace(/\\/g,'/');return s.slice(s.lastIndexOf('/')+1);}
+function drawDeskCards(){
+  if(!D.ok||!D.work)return;
+  for(var i=0;i<KEYS.length;i++){
+    var k=KEYS[i], who=BYROLE[k[2]], dsk=D.work[k[2]];
+    if(!who||!dsk)continue;
+    var cx=k[0]-8, cy=k[1]-36, acc=who.acc;
+    px(cx-1,cy-1,58,25,C.ink);
+    px(cx,cy,56,23,'#f7f4ff');
+    px(cx,cy,56,1,acc);
+    var t=dsk.task;
+    txt(t?(t.task_id+' '+Math.round(progressOf(t))+'%'):'WORK LOG',cx+2,cy+3,acc,1);
+    if(t){
+      px(cx+2,cy+10,52,2,mix('#f7f4ff','#000',.12));
+      px(cx+2,cy+10,Math.max(1,Math.round(52*progressOf(t)/100)),2,acc);
+    }
+    var arts=dsk.artifacts.slice(0,2);
+    for(var j=0;j<arts.length;j++){
+      txt(baseName(arts[j]).toUpperCase().replace(/[^ -~]/g,'').slice(0,13),cx+2,cy+14+j*5,C.ink2,1);
+    }
+    if(!arts.length&&dsk.last_work_logged) txt('LOGGED',cx+2,cy+14,C.ink2,1);
+  }
 }
 
 /* ---------------- layer builders ---------------- */
@@ -1261,6 +1401,7 @@ function frame(){
     KEYS.forEach(function(k){ drawKey(k[0],k[1],BYROLE[k[2]]&&BYROLE[k[2]].st!=='sleeping'); });
     drawRackLeds(); drawGate(); drawKanban(); drawFlame(); drawSteam();
     drawMeetingScreen();
+    drawDeskCards();
     updateCrewPositions();
     drawCrew();
     lighting();
@@ -1360,6 +1501,27 @@ function showDossier(p){
        '<div class="bar"><i style="width:'+pr+'%;background:'+m[3]+'"></i></div></div>';
   });
   if(ts.length>6) h+='<div class="none">و '+(ts.length-6)+' تسک دیگر…</div>';
+  /* Phase 4 (§7.1): what this role is REALLY working on — real task +
+     artifact paths only (no code content, nothing fabricated). */
+  var dsk=(D.work&&D.work[p.role])||null;
+  if(dsk){
+    h+='<h3>در حال کار روی</h3>';
+    if(dsk.task){
+      h+='<div class="tk"><b>'+esc(dsk.task.title||dsk.task.task_id)+'</b>'+
+         '<div class="mt"><code>'+esc(dsk.task.task_id||'')+'</code>'+
+         '<span style="margin-inline-start:auto">'+progressOf(dsk.task)+'٪</span></div></div>';
+    }
+    if(dsk.artifacts.length){
+      dsk.artifacts.forEach(function(a){
+        h+='<div class="mt" style="direction:ltr;text-align:left;font-size:9px;margin-bottom:1px">'+
+           '<code>'+esc(a)+'</code></div>';
+      });
+    }
+    if(dsk.last_work_logged){
+      h+='<div class="mt" style="font-size:9.5px;color:var(--mut)">'+
+         esc(faTime(dsk.last_work_logged.ts))+' · '+esc(dsk.last_work_logged.action_summary)+'</div>';
+    }
+  }
   if(evs.length){
     h+='<h3>رویدادهای این نقش</h3>';
     evs.forEach(function(e){
@@ -1644,6 +1806,277 @@ function sendChatMessage(p){
   }).then(function(){ if(btn)btn.disabled=false; });
 }
 
+/* ---------- Phase 5 telephone exchange «تلفنخانه» (plan §6/D5) ----------
+   Record → POST /api/phone {audio_base64, mime, transcript?, lang,
+   duration_ms}. MediaRecorder prefers audio/webm;codecs=opus (§6.2 chain),
+   32 kbps, hard 120 s auto-stop. The fa-IR Web Speech transcript is
+   BEST-EFFORT per §6.2/R8: unavailable or failed ⇒ the call ships
+   audio-only labelled «بدون متن — فقط صدا» — a transcript is NEVER
+   fabricated. Recent calls play back through /api/audio/<file> and carry
+   the honest answer status of their paired message («در انتظار نشست» until
+   a real CEO session replies). file:// pages hide the recorder (mic needs a
+   secure context) and show the CLI alternative instead — nothing fake. */
+var PHONE={
+  state:'idle',            /* idle | recording | preview */
+  rec:null, chunks:[], mime:'audio/webm', blob:null, url:null,
+  startTs:0, timer:null, secs:0,
+  recog:null, recogLive:false, transcript:null, interim:'', speechNote:'',
+  stream:null, sending:false
+};
+function phoneEl(){return document.getElementById('phoneBox');}
+function fmtDur(ms){var s=Math.max(0,Math.round((ms||0)/1000));
+  return ('0'+Math.floor(s/60)).slice(-2)+':'+('0'+(s%60)).slice(-2);}
+function pickMime(){
+  if(!window.MediaRecorder)return '';
+  var chain=['audio/webm;codecs=opus','audio/webm','audio/mp4']; /* §6.2 */
+  for(var i=0;i<chain.length;i++){
+    try{ if(MediaRecorder.isTypeSupported(chain[i]))return chain[i]; }catch(e){}
+  }
+  return '';
+}
+function speechCtor(){return window.SpeechRecognition||window.webkitSpeechRecognition||null;}
+function phoneSetErr(t){var e=document.getElementById('phErr');
+  if(e){e.textContent=t||'';e.hidden=!t;}}
+
+function renderPhoneRec(){
+  var rec=document.getElementById('phoneRec'); if(!rec)return;
+  if(PHONE.state==='idle'){
+    if(CHAT.online){
+      rec.innerHTML='<button class="phbtn pri" id="phStart" type="button">☎ تماس با مدیر</button>'+
+        '<div class="pherr" id="phErr" hidden></div>';
+      var b=document.getElementById('phStart');
+      if(b)b.addEventListener('click',phoneStart);
+    }else{
+      /* honest file:// degradation (§6.2/R1): mic needs a secure context */
+      rec.innerHTML='<div class="coff">برای ضبط صدا، سرور محلی را روشن کنید — یا از خط فرمان بفرستید:<br>'+
+        '<code>node tools/phone-drop.js --text "پیام"</code><br>'+
+        '<code>node tools/phone-drop.js --audio C:\\tmp\\note.webm</code></div>';
+    }
+    return;
+  }
+  if(PHONE.state==='recording'){
+    rec.innerHTML='<div class="phrow"><span class="phtime" id="phTime">● '+esc(fmtDur(PHONE.secs))+'</span>'+
+      '<span class="phnt">در حال ضبط</span>'+
+      '<button class="phbtn danger" id="phStop" type="button">پایان ضبط</button></div>'+
+      '<div class="phlive" id="phLive"></div>'+
+      '<div class="pherr" id="phErr" hidden></div>';
+    var s=document.getElementById('phStop');
+    if(s)s.addEventListener('click',phoneStop);
+    phonePaintLive();
+    return;
+  }
+  /* preview */
+  rec.innerHTML='<audio id="phPrev" controls src="'+esc(PHONE.url||'')+'"></audio>'+
+    '<div class="phmeta"><span>'+esc(fmtDur(PHONE.secs))+'</span><span>'+
+    (PHONE.transcript?'متن پیوست شد':'<span class="phnt">بدون متن — فقط صدا</span>')+'</span></div>'+
+    '<div class="phrow"><button class="phbtn pri" id="phSend" type="button">ارسال</button>'+
+    '<button class="phbtn" id="phDiscard" type="button">دور انداختن</button></div>'+
+    '<div class="pherr" id="phErr" hidden></div>';
+  var sd=document.getElementById('phSend'), dc=document.getElementById('phDiscard');
+  if(sd)sd.addEventListener('click',phoneSend);
+  if(dc)dc.addEventListener('click',phoneDiscard);
+}
+function phonePaintLive(){
+  var el=document.getElementById('phLive'); if(!el)return;
+  if(PHONE.transcript||PHONE.interim){
+    el.innerHTML='<b>متن زنده:</b> '+esc(PHONE.transcript||'')+
+      (PHONE.interim?' <i>'+esc(PHONE.interim)+'…</i>':'');
+  }else if(PHONE.speechNote){
+    el.innerHTML='<span class="phnt">'+esc(PHONE.speechNote)+'</span>';
+  }else{
+    el.textContent='در حال شنیدن…';
+  }
+}
+function phoneStartSpeech(){
+  var SR=speechCtor();
+  if(!SR){ PHONE.speechNote='بدون متن — فقط صدا'; phonePaintLive(); return; }
+  var r;
+  try{ r=new SR(); }catch(e){ PHONE.speechNote='بدون متن — فقط صدا'; phonePaintLive(); return; }
+  PHONE.recog=r; PHONE.recogLive=true;
+  r.lang='fa-IR'; r.interimResults=true; r.continuous=false; /* §6.2 verbatim */
+  r.onresult=function(ev){
+    var interim='';
+    for(var i=ev.resultIndex;i<ev.results.length;i++){
+      var res=ev.results[i];
+      if(res.isFinal){
+        var t=String(res[0].transcript||'').trim();
+        if(t)PHONE.transcript=((PHONE.transcript?PHONE.transcript+' ':'')+t).trim();
+      }else interim+=String(res[0].transcript||'');
+    }
+    PHONE.interim=interim.trim();
+    phonePaintLive();
+  };
+  r.onerror=function(){ /* NON-fatal (R8): keep recording, label honestly */
+    PHONE.recogLive=false;
+    PHONE.speechNote=PHONE.transcript?'':'بدون متن — فقط صدا';
+    phonePaintLive();
+  };
+  r.onend=function(){
+    PHONE.recogLive=false;
+    if(!PHONE.transcript&&!PHONE.interim)PHONE.speechNote='بدون متن — فقط صدا';
+    phonePaintLive();
+  };
+  try{ r.start(); }catch(e){
+    PHONE.recogLive=false; PHONE.speechNote='بدون متن — فقط صدا'; phonePaintLive();
+  }
+}
+function phoneStart(){
+  if(PHONE.state!=='idle'||!CHAT.online)return;
+  phoneSetErr('');
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia||!window.MediaRecorder){
+    phoneSetErr('این مرورگر از ضبط صدا پشتیبانی نمی‌کند.'); return;
+  }
+  navigator.mediaDevices.getUserMedia({audio:true}).then(function(stream){
+    PHONE.stream=stream;
+    var mime=pickMime(), rec;
+    try{
+      rec=new MediaRecorder(stream,mime?{mimeType:mime,audioBitsPerSecond:32000}:{audioBitsPerSecond:32000});
+    }catch(e){
+      try{ rec=new MediaRecorder(stream); }
+      catch(e2){ stream.getTracks().forEach(function(t){t.stop();});
+        phoneSetErr('شروع ضبط ممکن نشد.'); return; }
+    }
+    PHONE.rec=rec; PHONE.chunks=[]; PHONE.mime=rec.mimeType||mime||'audio/webm';
+    PHONE.transcript=null; PHONE.interim=''; PHONE.speechNote='';
+    PHONE.startTs=Date.now(); PHONE.secs=0;
+    rec.ondataavailable=function(ev){ if(ev&&ev.data&&ev.data.size)PHONE.chunks.push(ev.data); };
+    rec.onerror=function(){ phoneSetErr('خطای ضبط رخ داد — ادامه می‌دهیم.'); };
+    rec.onstop=phoneAssemble;
+    try{ rec.start(); }catch(e){
+      stream.getTracks().forEach(function(t){t.stop();});
+      phoneSetErr('شروع ضبط ممکن نشد.'); return;
+    }
+    PHONE.state='recording';
+    phoneStartSpeech();
+    renderPhoneRec();
+    PHONE.timer=setInterval(function(){
+      PHONE.secs=Date.now()-PHONE.startTs;
+      var t=document.getElementById('phTime');
+      if(t)t.textContent='● '+fmtDur(PHONE.secs);
+      if(PHONE.secs>=120000)phoneStop(); /* hard cap §6.2 */
+    },250);
+  }).catch(function(err){
+    phoneSetErr('دسترسی به میکروفون ممکن نشد'+
+      (err&&err.name==='NotAllowedError'?' — اجازه داده نشد.':'.'));
+  });
+}
+function phoneStop(){
+  if(PHONE.state!=='recording')return;
+  if(PHONE.timer){clearInterval(PHONE.timer);PHONE.timer=null;}
+  try{ if(PHONE.recog&&PHONE.recogLive)PHONE.recog.stop(); }catch(e){}
+  try{ PHONE.rec.stop(); }catch(e){ phoneAssemble(); }
+}
+function phoneAssemble(){
+  if(PHONE.stream){try{PHONE.stream.getTracks().forEach(function(t){t.stop();});}catch(e){} PHONE.stream=null;}
+  var type=String(PHONE.mime||'audio/webm').split(';')[0];
+  PHONE.blob=new Blob(PHONE.chunks,{type:type});
+  PHONE.chunks=[];
+  if(PHONE.url)URL.revokeObjectURL(PHONE.url);
+  PHONE.url=URL.createObjectURL(PHONE.blob);
+  PHONE.state='preview';
+  renderPhoneRec();
+}
+function phoneDiscard(){
+  if(PHONE.timer){clearInterval(PHONE.timer);PHONE.timer=null;}
+  try{ if(PHONE.recog&&PHONE.recogLive)PHONE.recog.stop(); }catch(e){}
+  PHONE.recog=null; PHONE.recogLive=false;
+  if(PHONE.stream){try{PHONE.stream.getTracks().forEach(function(t){t.stop();});}catch(e){} PHONE.stream=null;}
+  if(PHONE.url){URL.revokeObjectURL(PHONE.url);PHONE.url=null;}
+  PHONE.blob=null; PHONE.rec=null; PHONE.chunks=[];
+  PHONE.transcript=null; PHONE.interim=''; PHONE.speechNote=''; PHONE.secs=0;
+  PHONE.state='idle';
+  renderPhoneRec();
+}
+/* Submit → POST /api/phone. Server validation errors are shown verbatim;
+   nothing is optimistic: the call appears only once both events are really
+   in the ledger and the next payload (SSE tick or refresh) carries them. */
+function phoneSend(){
+  if(PHONE.state!=='preview'||PHONE.sending||!PHONE.blob)return;
+  phoneSetErr('');
+  PHONE.sending=true;
+  var btn=document.getElementById('phSend'); if(btn)btn.disabled=true;
+  var fr=new FileReader();
+  fr.onload=function(){
+    var b64=String(fr.result||''), comma=b64.indexOf(',');
+    if(comma>0)b64=b64.slice(comma+1);
+    fetch('/api/phone',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        audio_base64:b64,
+        mime:String(PHONE.mime||'audio/webm').split(';')[0],
+        transcript:PHONE.transcript||null,
+        lang:'fa-IR',
+        duration_ms:Math.max(0,Math.round(PHONE.secs))
+      })
+    }).then(function(r){
+      return r.json().catch(function(){return {};}).then(function(j){return {status:r.status,j:j};});
+    }).then(function(res){
+      if(res.status===200&&res.j&&res.j.ok){
+        srSay('تماس شما در تلفنخانه ثبت شد و برای مدیر ارسال گردید.');
+        phoneDiscard();
+        refresh();
+      }else if(res.status===429){
+        phoneSetErr('سرعت ارسال زیاد است — کمی صبر کنید و دوباره بفرستید.');
+      }else if(res.status===413){
+        phoneSetErr('حجم صدای ارسالی بیش از حد مجاز است (حداکثر ۱۲۰ ثانیه).');
+      }else if(res.j&&Array.isArray(res.j.reasons)&&res.j.reasons.length){
+        phoneSetErr('تماس پذیرفته نشد: '+res.j.reasons.join('؛ '));
+      }else{
+        phoneSetErr('ارسال ناموفق بود (کد '+res.status+').');
+      }
+    }).catch(function(){
+      phoneSetErr('ارتباط با سرور برقرار نشد — تماس ارسال نشد.');
+    }).then(function(){
+      PHONE.sending=false;
+      var b=document.getElementById('phSend'); if(b)b.disabled=false;
+    });
+  };
+  fr.onerror=function(){ PHONE.sending=false; phoneSetErr('خواندن فایل صوتی ناموفق بود.'); };
+  fr.readAsDataURL(PHONE.blob);
+}
+/* Recent calls (§1.4 phone.recent): playback ONLY when served over http
+   (the /api/audio URL does not resolve from file:// — shown honestly as
+   metadata there), transcript or the explicit no-transcript label, and the
+   paired-message answer status with «در انتظار نشست» semantics. */
+function renderPhoneList(){
+  var box=phoneEl(); if(!box)return;
+  var list=document.getElementById('phoneList');
+  if(!list){
+    list=document.createElement('div');
+    list.id='phoneList'; list.className='phcalls';
+    box.appendChild(list);
+  }
+  var rec=document.getElementById('phoneRec');
+  if(!rec){
+    rec=document.createElement('div');
+    rec.id='phoneRec'; rec.className='phrec';
+    box.insertBefore(rec,list);
+    renderPhoneRec();
+  }
+  var calls=(D.phone&&Array.isArray(D.phone.recent))?D.phone.recent:[];
+  var h='';
+  if(!calls.length){
+    h='<div class="none">هنوز تماسی ثبت نشده است.</div>';
+  }else{
+    var act=sessionActive('ceo');
+    calls.forEach(function(c){
+      h+='<div class="phcall">'+
+         '<div class="phmeta"><span>'+esc(faTime(c.ts))+'</span>'+
+         '<span>'+esc(fmtDur(c.duration_ms))+'</span>'+
+         '<span class="pnd'+(c.answered?'':' q')+'">'+
+         (c.answered?('پاسخ '+esc(c.answered_by||'')):(act?'در صف پاسخ':'در انتظار نشست'))+
+         '</span></div>';
+      if(c.has_transcript&&c.transcript)h+='<div class="phtx">'+esc(c.transcript)+'</div>';
+      else h+='<div class="phmeta"><span class="phnt">بدون متن — فقط صدا</span></div>';
+      if(CHAT.online&&c.audio_url)h+='<audio controls preload="none" src="'+esc(c.audio_url)+'"></audio>';
+      h+='</div>';
+    });
+  }
+  if(list.__h===h)return; /* payload ticks must not restart playing audio */
+  list.__h=h; list.innerHTML=h;
+}
+
 /* ---------------- sidebar ---------------- */
 /* entity strings are built by concatenation so HTML-aware editors cannot
    decode them inside the inline script — the produced markup is identical */
@@ -1768,25 +2201,43 @@ function renderLegend(){
 }
 
 /* ---------------- wire data into the room ---------------- */
-var MEETING=[], celebrate=[], MEETTASKS=[];
+var MEETING=[], celebrate=[], MEETTASKS=[], MEETINFO=null;
 function applyData(){
   var now=Date.now();
+  /* Phase 4 (§7.2): gathering is driven ONLY by a real ACTIVE meeting from
+     the composed payload (latest meeting_started without meeting_ended).
+     Crash-safety: a start open >10 min expires visually with an
+     «interrupted» tag. No active meeting ⇒ NOBODY fake-gathers — a stale
+     mood:'meeting' honestly degrades to working. */
+  var am=D.meeting, mAge=am?(now-Date.parse(am.started_ts)):Infinity;
+  var meetLive=!!(am&&isFinite(mAge)&&mAge>=0&&mAge<600000);
+  var meetStale=!!(am&&isFinite(mAge)&&mAge>=600000);
+  MEETINFO=am?{live:meetLive,stale:meetStale,topic:am.topic,reason:am.reason,
+               participants:am.participants.slice(),agenda:am.agenda_task_ids.slice(),
+               mins:isFinite(mAge)?Math.floor(mAge/60000):0}:null;
+  var inMeet={};
+  if(meetLive) am.participants.forEach(function(r){inMeet[r]=true;});
   var meetingList=[];
   CREW.forEach(function(p,i){
     var r=D.roles[p.role]||{};
-    p.st = D.ok ? (MOODS[r.mood]?r.mood:'working') : 'working';
+    var mood = D.ok ? (MOODS[r.mood]?r.mood:'working') : 'working';
+    if(mood==='meeting'&&!inMeet[p.role]) mood='working'; /* honesty rule */
+    p.st = mood;
     /* prefer live energy_hint (0-100); fall back to time-decay estimate */
     p.energy = D.ok ? (r.ehint!=null ? r.ehint : energyOf(r.last,now)) : 20;
     p.active = !!r.active;
     p.last = r.last||null;
     p.seedN = i*13+7;
     p.speaking=false;
-    if(p.st==='meeting') meetingList.push(p);
+    if(inMeet[p.role]) meetingList.push(p);
   });
+  /* seat order follows the payload's participant list */
+  if(meetLive) meetingList.sort(function(a,b){
+    return am.participants.indexOf(a.role)-am.participants.indexOf(b.role); });
   /* seat the meeting, walk everyone else home */
   CREW.forEach(function(p){
     var want;
-    if(p.st==='meeting'){
+    if(meetLive&&inMeet[p.role]){
       var idx=meetingList.indexOf(p);
       p.seatIdx=idx;
       want = idx<SEATS.length ? [SEATS[idx][0],SEATS[idx][1]] : [310+((idx-6)*20),268];
@@ -1797,11 +2248,19 @@ function applyData(){
     }
   });
   MEETING=meetingList;
-  /* real agenda for the meeting wall screen: newest doing/review tasks */
-  MEETTASKS = D.ok ? D.tasks.filter(function(t){
+  /* wall-screen agenda (§7.2): during a REAL meeting show ITS agenda tasks
+     (only ones that truly exist on the board — never invented rows);
+     otherwise the newest doing/review tasks as before. */
+  var doingFirst = D.ok ? D.tasks.filter(function(t){
       return t && (t.status==='doing'||t.status==='review'); })
-    .sort(function(a,b){ return (Date.parse(b.updated_ts)||0)-(Date.parse(a.updated_ts)||0); })
-    .slice(0,3) : [];
+    .sort(function(a,b){ return (Date.parse(b.updated_ts)||0)-(Date.parse(a.updated_ts)||0); }) : [];
+  if(meetLive&&am.agenda_task_ids.length){
+    MEETTASKS = am.agenda_task_ids.map(function(id){
+      return doingFirst.filter(function(t){return t.task_id===id;})[0]; })
+      .filter(Boolean).slice(0,3);
+  } else {
+    MEETTASKS = doingFirst.slice(0,3);
+  }
   /* celebrations for wins in the last 60s */
   parts.length=0;
   if(D.ok){
@@ -1820,6 +2279,7 @@ function applyData(){
   renderSidebar();
   refreshDialogue();
   refreshChatBubbles();
+  renderPhoneList();
 }
 
 /* rotate the speaker in the meeting, fire queued celebrations */

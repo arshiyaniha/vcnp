@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Vibe-Office Studio</title>
+<!--
+  Thin page (live-office plan §5.1/§5.3): all rendering logic lives in
+  assets/studio-renderer.js; this file is HTML/CSS (ported from the
+  a-studio.html prototype) plus a small bootstrap. It reads the static
+  ../dashboard-data.js snapshot exactly like templates/dashboard-pixel.html
+  so file:// keeps working with the server off, then upgrades to live SSE
+  or 45s polling via vcnp-store-client.js when reachable.
+-->
+<style>
+:root{
+  --paper:#eef1f7; --paper2:#e3e8f2; --ink:#151b2b; --ink2:#3d4763; --mut:#7b869f;
+  --line:#cfd7e6; --card:#ffffffd9;
+  --amber:#f5a524; --violet:#8b5cf6; --blue:#3b82f6; --emerald:#10b981;
+  --teal:#14b8a6; --rose:#f43f5e; --pink:#ec4899; --orange:#f97316; --indigo:#6366f1;
+  --fa:"Vazirmatn","Segoe UI",Tahoma,system-ui,sans-serif;
+  --mn:ui-monospace,"SF Mono",Consolas,monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;overflow:hidden;background:var(--paper);color:var(--ink);font-family:var(--fa)}
+canvas{display:block;position:fixed;inset:0}
+.top{position:fixed;top:0;left:0;right:0;height:56px;display:flex;align-items:center;gap:14px;
+  padding:0 18px;z-index:3;pointer-events:none}
+.top .brand{font-size:15px;font-weight:700;letter-spacing:.2px}
+.top .brand span{display:block;font-size:10.5px;font-weight:400;color:var(--mut)}
+.top .grow{flex:1}
+.pill{pointer-events:auto;background:var(--card);backdrop-filter:blur(10px);border:1px solid var(--line);
+  border-radius:999px;padding:6px 14px;font-size:12px;display:flex;align-items:center;gap:8px;
+  box-shadow:0 6px 20px #1520400f}
+.pill b{font-family:var(--mn);font-weight:600;font-variant-numeric:tabular-nums}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--emerald)}
+button.pill{cursor:pointer;font-family:inherit;color:inherit}
+button.pill:hover{background:#fff}
+.rail{position:fixed;top:64px;bottom:16px;inset-inline-start:16px;width:296px;z-index:3;
+  background:var(--card);backdrop-filter:blur(14px);border:1px solid var(--line);border-radius:18px;
+  padding:16px;overflow-y:auto;box-shadow:0 18px 50px #15204014;transition:transform .32s cubic-bezier(.2,.8,.2,1),opacity .28s}
+.rail.hid{transform:translateX(120%);opacity:0;pointer-events:none}
+.rail h2{font-size:10.5px;color:var(--mut);letter-spacing:.7px;margin:18px 0 8px;font-weight:700}
+.rail h2:first-child{margin-top:0}
+.kpi{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.kpi div{background:#ffffffb0;border:1px solid var(--line);border-radius:12px;padding:9px 6px;text-align:center}
+.kpi b{display:block;font-family:var(--mn);font-size:20px;font-variant-numeric:tabular-nums}
+.kpi small{font-size:9.5px;color:var(--mut)}
+.bar{display:flex;height:9px;border-radius:999px;overflow:hidden;background:#dbe2ee}
+.bar i{display:block}
+.lgs{display:flex;flex-wrap:wrap;gap:5px;margin-top:9px}
+.lgs span{font-size:10px;display:flex;align-items:center;gap:5px;background:#ffffffb0;border:1px solid var(--line);
+  border-radius:999px;padding:2px 9px}
+.lgs i{width:7px;height:7px;border-radius:50%}
+.lgs u{text-decoration:none;font-family:var(--mn);color:var(--ink2)}
+.crew{display:grid;gap:6px}
+.cr{display:flex;align-items:center;gap:9px;background:#ffffffb0;border:1px solid var(--line);
+  border-radius:12px;padding:7px 10px;cursor:pointer;transition:transform .16s,box-shadow .16s}
+.cr:hover{transform:translateX(-3px);box-shadow:0 6px 16px #15204014}
+.cr.sel{border-color:var(--ink);box-shadow:0 0 0 2px #151b2b18}
+.cr .av{width:22px;height:22px;border-radius:50%;flex:none;display:grid;place-items:center;color:#fff;
+  font-size:10px;font-weight:700}
+.cr .nm{flex:1;font-size:11.5px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cr .md{font-size:10px;color:var(--mut);flex:none}
+.cr .en{width:30px;height:5px;border-radius:999px;background:#dbe2ee;flex:none;overflow:hidden}
+.cr .en i{display:block;height:100%}
+.ev{list-style:none;margin:0;padding:0;display:grid;gap:5px}
+.ev li{background:#ffffffb0;border:1px solid var(--line);border-radius:10px;padding:5px 9px;font-size:10.5px;
+  display:flex;gap:7px;align-items:baseline}
+.ev .t{font-family:var(--mn);font-size:9.5px;color:var(--mut);direction:ltr}
+.ev .x{flex:1;font-family:var(--mn);font-size:9.5px;direction:ltr;color:var(--ink2)}
+.ev .a{font-size:9px;border-radius:999px;padding:1px 7px;color:#fff;font-weight:700}
+.card{position:fixed;inset-inline-end:16px;top:64px;width:290px;z-index:4;background:var(--card);
+  backdrop-filter:blur(14px);border:1px solid var(--line);border-radius:18px;padding:16px;
+  box-shadow:0 20px 60px #1520401f;transition:opacity .25s,transform .25s}
+.card[hidden]{display:block;opacity:0;transform:translateY(-8px);pointer-events:none}
+.card .hd{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.card .hd .av{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;color:#fff;font-weight:700}
+.card .hd b{font-size:14px}.card .hd small{display:block;font-family:var(--mn);font-size:9px;color:var(--mut)}
+.card .chips{display:flex;gap:5px;flex-wrap:wrap;margin-bottom:10px}
+.card .chips span{font-size:10px;border-radius:999px;padding:2px 9px;background:#ffffffcc;border:1px solid var(--line)}
+.card h3{font-size:10px;color:var(--mut);letter-spacing:.6px;margin:12px 0 6px}
+.card .tk{background:#ffffffb0;border:1px solid var(--line);border-radius:12px;padding:8px 10px;margin-bottom:6px}
+.card .tk b{font-size:11.5px;font-weight:600;display:block}
+.card .tk .m{display:flex;align-items:center;gap:6px;font-size:9.5px;color:var(--mut);margin-top:4px}
+.card .tk .m i{width:7px;height:7px;border-radius:50%}
+.card .tk .m code{font-family:var(--mn);margin-inline-start:auto}
+.card .close{position:absolute;inset-inline-end:12px;top:12px;border:0;background:#eef1f7;border-radius:8px;
+  width:24px;height:24px;cursor:pointer;color:var(--ink2);font-size:13px;line-height:1}
+.hint{position:fixed;bottom:16px;inset-inline-start:16px;font-size:11px;color:var(--mut);z-index:3}
+@media(prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div class="top">
+  <div class="brand">Vibe-Office <span>نمای استودیو — ایزومتریک برداری</span></div>
+  <span class="grow"></span>
+  <div class="pill"><span class="dot"></span><b id="clk">--:--</b></div>
+  <button class="pill" id="btnRail">پنل وضعیت</button>
+</div>
+
+<aside class="rail" id="rail">
+  <h2>نبض شرکت</h2>
+  <div class="kpi">
+    <div><b id="kP">—</b><small>پیشرفت</small></div>
+    <div><b id="kA">—</b><small>در جریان</small></div>
+    <div><b id="kB">—</b><small>گیر کرده</small></div>
+  </div>
+  <h2>خط لولهٔ کار</h2>
+  <div class="bar" id="bar"></div>
+  <div class="lgs" id="lgs"></div>
+  <h2>کارمندان</h2>
+  <div class="crew" id="crew"></div>
+  <h2>آخرین رویدادها</h2>
+  <ul class="ev" id="ev"></ul>
+</aside>
+
+<div class="card" id="card" hidden></div>
+<div class="hint">روی هر کارمند کلیک کنید</div>
+
+<script src="../dashboard-data.js"></script>
+<script src="assets/vcnp-normalize.js"></script>
+<script src="assets/vcnp-store-client.js"></script>
+<script src="assets/studio-renderer.js"></script>
+<script>
+(function(){
+  'use strict';
+  VCNPStudio.init();
+  /* Live upgrade (plan §5.3): SSE with polling fallback; on total failure the
+     store client keeps delivering the static window.VCNP_DATA snapshot with
+     meta.live=false, so the offline badge is honest and nothing is faked. */
+  VCNP_STORE.connect({
+    onPayload: function(payload, meta){
+      VCNPStudio.apply(VCNP.normalize(payload), meta);
+    }
+  });
+})();
+</script>
+</body>
+</html>

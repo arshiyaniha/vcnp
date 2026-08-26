@@ -22,7 +22,17 @@ event_log { "actor": "<your-role>", "action": "session_lifecycle",
 ## 2. During the session — one event per meaningful unit of real work
 
 Each time you finish a meaningful unit (a file written, a review completed, a plan
-published, a decision made):
+published, a decision made), log it with the dedicated **`work_log`** tool
+(live-office plan §3.1):
+
+```
+work_log { "action_summary": "<what was actually done, <=300 chars>",
+           "artifact_refs": ["<workspace-relative/path>"],
+           "task_id": "T-NNN",              # optional
+           "as_role": "<your-role>" }       # optional; default executor
+```
+
+Equivalent raw form (still valid when the wrapper is unavailable):
 
 ```
 event_log { "actor": "<your-role>", "action": "work_logged",
@@ -33,6 +43,10 @@ event_log { "actor": "<your-role>", "action": "work_logged",
 
 - `artifact_refs` MUST be real workspace-relative paths (no `..`, nothing fabricated).
 - A unit with no artifact may omit `artifact_refs`; it may never invent them.
+- Real meetings are also logged through dedicated tools:
+  `meeting_start { topic, participants[2..9 roles], reason: qa_gate|critical_task|standup|phone|explicit, task_id? }`
+  and `meeting_end { outcome_summary? }` — only the actor who started a meeting
+  may end it, and only one meeting may be active at a time.
 
 ## 3. Task status stays on the board
 
@@ -57,7 +71,7 @@ event_log { "actor": "<your-role>", "action": "session_lifecycle",
 ## 5. Honesty rules
 
 - Log what ACTUALLY happened; never pre-log planned work as done.
-- Dedicated wrapper tools (`work_log`, `meeting_start`, `meeting_end`) arrive in a
-  later phase of the live-office plan. Until they appear in `tools/list`, use
-  `event_log` with the exact action names shown above — nothing else changes.
+- Dedicated wrapper tools (`work_log`, `meeting_start`, `meeting_end`) are LIVE
+  since Phase 4 of the live-office plan — prefer them over raw `event_log`;
+  the raw forms above remain valid equivalents.
 - If the MCP server is unreachable, say so and continue without faking events.

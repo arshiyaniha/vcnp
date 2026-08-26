@@ -28,6 +28,8 @@
 const store = require('../store');
 const report = require('../tools/report');
 const inbox = require('./inbox-core');
+const work = require('./work-core');
+const phone = require('./phone-core');
 
 const RECENT_EVENTS_LIMIT = 25; // parity with tools/report.js
 
@@ -65,8 +67,16 @@ function build(opts) {
       })(),
       session_active: inbox.deriveSessionActive(events),
     },
-    meetings: { active: null, recent: [] },
-    phone: { recent: [] },
+    /* Phase 4 (§1.4/§7): REAL visible-work + meeting projections.
+     * work.by_role[role] = {task, artifacts[], last_work_logged} desk card
+     * data — only roles with real tasks/work_logged appear. meetings.active
+     * = latest meeting_started without a matching meeting_ended (null when
+     * none) — the dashboard gathers characters ONLY from this truth. */
+    work: work.projectWork(events, state),
+    meetings: work.projectMeetings(events),
+    /* Phase 5 (§1.4/§6): REAL telephone-exchange projection — recent calls
+     * joined with their paired-message answer status server-side. */
+    phone: phone.projectPhone(events),
     server: { live: true, ledger_seq: events.length, port },
   };
 }

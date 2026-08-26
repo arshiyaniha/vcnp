@@ -24,8 +24,9 @@
 | `skills/` | 7 skills: core trio (constitution / protocol / board-ops) + web-design, deploy-server, security-basics, smart-resources |
 | `mcp/vcnp-office-mcp/` | MCP server (13 tools): board CRUD, compaction gate, cost-truth ledger/telemetry, model router, async `llm_batch`, reports |
 | `office/` | ⭐ Shared state: `events.log.jsonl` (source of truth), `state.json`, `BOARD.md`, `office-live.json`, `dashboard-data.js`, `dashboard.html`, memory bank |
-| `templates/dashboard.html` | Wall MVP source template (data path points one level up) |
-| `demo/` | Golden-path demo: `run-golden-path.js` script + built site in `demo/site/` |
+| `office/live/` | Live style switcher (`index.html?style=pixel\|studio`), the ported studio renderer (`studio.html`), and shared browser modules (`assets/vcnp-normalize.js`, `vcnp-store-client.js`, `studio-renderer.js`) |
+| `templates/dashboard.html`, `templates/dashboard-pixel.html` | Wall MVP source templates (data path points one level up; the pixel template also carries the live SSE bootstrap) |
+| `demo/` | Golden-path demo (`run-golden-path.js`) + built site in `demo/site/`; live-office end-to-end demo (`run-live-office.js`) |
 | `plans/vcnp-vibe-office-plan.md` | The blueprint (phases §14, wall §6.3–6.4) |
 | `adapters/roo/rules/` | Adapter rules |
 
@@ -64,6 +65,21 @@ node demo/run-golden-path.js
 ```
 
 Runs the full pipeline through the store engine — board init → 3 task briefs → executor result reports → simulated QA passes → queue drain to Done — printing a beginner-friendly trace of every office action. The built output lives at [`demo/site/index.html`](../demo/site/index.html).
+
+## 🔴 Live Office — SSE server, chat, تلفنخانه | دفتر زنده
+
+The live office (design: [`plans/live-office-plan.md`](../plans/live-office-plan.md)) adds a real-time layer on top of the same append-only ledger — nothing here changes `state.json`'s fold semantics; chat/meetings/phone are query-time projections.
+
+```bash
+cd mcp/vcnp-office-mcp
+npm run live     # node src/live-server.js — binds 127.0.0.1:7788 (env VCNP_OFFICE_PORT to override)
+```
+
+* Open **`office/live/index.html?style=pixel`** or **`?style=studio`** in a browser (works both via `file://` and through the live server) to pick between the pixel dashboard and the ported isometric studio renderer — the choice persists in `localStorage` and is deep-linkable via `?style=`.
+* Both styles read the SAME composed payload (`GET /api/data`, or pushed live via `GET /api/stream` SSE) through the shared `office/live/assets/vcnp-normalize.js` module — no per-style data scraping. With the server off, both fall back to the static `office/dashboard-data.js` snapshot and show an honest offline indicator.
+* **Chat** (Scenario A "honest queue"): type a message to a role in the UI, or `POST /api/message`, or `node tools/phone-drop.js --text "..."` from the CLI — all three append a `message_posted` ledger event through the identical write path. A real `vcnp-ceo`/`vcnp-orchestrator` session drains it via the `inbox_list`/`inbox_reply` MCP tools. Nothing is answered automatically — an unanswered message shows «در انتظار نشست» (awaiting session), never a simulated reply.
+* **تلفنخانه (Telephone exchange)**: click «☎ تماس با مدیر» in the browser (requires `http://localhost:7788` — mic access is blocked on `file://`) to record and send a voice note, or drop one from the CLI: `node tools/phone-drop.js --audio path\to\note.webm [--transcript "..."]`. Both paths write `office/phone/<stamp>.webm` + a sidecar JSON and append the same paired `phone_call_received` + `message_posted` events.
+* **End-to-end proof**: `node demo/run-live-office.js` boots the server on an ephemeral port, posts a web message, drops a phone-exchange text note via the CLI, watches both arrive over its own SSE connection, and confirms the mirrors were regenerated — exits 0 only if every step is verified live (no simulated output).
 
 ---
 
@@ -113,3 +129,14 @@ node demo/run-golden-path.js
 ```
 
 کل خط لوله را با موتور ذخیره‌سازی اجرا می‌کند — مقداردهی تخته ← ۳ بریف تسک ← گزارش مجری ← تأیید شبیه‌سازی‌شدهٔ QA ← تخلیهٔ صف تا «انجام شده» — و ردپای گام‌به‌گام هر اقدام دفتر را چاپ می‌کند. خروجی ساخته‌شده: `demo/site/index.html`.
+
+## دفتر زنده — سرور SSE، گفتگو، تلفنخانه
+
+جزئیات کامل و راهنمای گام‌به‌گام تلفنخانه در [RAHNAMA-FA.md](RAHNAMA-FA.md#-تلفنخانه) آمده است. خلاصه:
+
+```bash
+cd mcp/vcnp-office-mcp
+npm run live     # اجرای سرور زنده روی 127.0.0.1:7788
+```
+
+فایل `office/live/index.html?style=pixel` یا `?style=studio` را باز کنید تا بین دو سبک نمایش سوییچ کنید؛ هر دو از یک دادهٔ زنده (SSE) تغذیه می‌شوند و با خاموش‌بودن سرور به‌طور صادقانه به حالت آفلاین برمی‌گردند.

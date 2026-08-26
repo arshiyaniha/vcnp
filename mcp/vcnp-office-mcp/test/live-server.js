@@ -265,7 +265,7 @@ async function main() {
   {
     const p = compose.build({ port: 7788 });
     const expected = ['schema_version', 'generated_ts', 'state', 'live', 'generated_at',
-      'recent_events', 'chat', 'meetings', 'phone', 'server'];
+      'recent_events', 'chat', 'work', 'meetings', 'phone', 'server'];
     const keys = Object.keys(p);
     check('C1: exact top-level field set (§1.4 + VCNP_DATA conventions)',
       keys.length === expected.length && expected.every((k) => keys.includes(k)), keys.join(','));
@@ -297,6 +297,8 @@ async function main() {
     check('C1: meetings/phone empty shapes',
       p.meetings.active === null && Array.isArray(p.meetings.recent) && p.meetings.recent.length === 0 &&
       Array.isArray(p.phone.recent) && p.phone.recent.length === 0);
+    check('C1: work section shape (§7.1 desk contract; honest silence on empty ledger)',
+      p.work && typeof p.work.by_role === 'object' && Object.keys(p.work.by_role).length === 0);
     check('C1: server block {live:true, ledger_seq, port}',
       p.server.live === true && p.server.ledger_seq === 3 && p.server.port === 7788);
   }
@@ -338,6 +340,8 @@ async function main() {
     check('C2: state identical to dashboard-data.js', deepEqual(D.state, V.state));
     check('C2: live.roles identical to dashboard-data.js', deepEqual(D.live.roles, V.live.roles));
     check('C2: recent_events identical to dashboard-data.js', deepEqual(D.recent_events, V.recent_events));
+    check('C2: Phase-4 work/meetings identical to dashboard-data.js (file:// parity)',
+      deepEqual(D.work, V.work) && deepEqual(D.meetings, V.meetings));
     check('C2: server.live true (mirror snapshot has no server block)', D.server && D.server.live === true);
     const strip = (p) => {
       const c = JSON.parse(JSON.stringify(p));
@@ -370,6 +374,14 @@ async function main() {
     check('C3: broadcast after cross-process append (seq 4)', ev.json.server.ledger_seq === 4);
     check('C3: broadcast carries the new event', ev.json.recent_events.some((e) => e.action === 'work_logged'));
     check('C3: broadcast id increments (Last-Event-ID contract)', ev.id === '4');
+    /* Phase 4: the SAME frame carries the refreshed visible-work projection */
+    check('C3: broadcast carries updated work section (executor desk from real work_logged)',
+      ev.json.work && ev.json.work.by_role.executor &&
+      ev.json.work.by_role.executor.last_work_logged !== null &&
+      ev.json.work.by_role.executor.last_work_logged.ts,
+      JSON.stringify(ev.json.work || {}).slice(0, 200));
+    check('C3: broadcast meetings stay honest (no meeting events ⇒ active null)',
+      ev.json.meetings && ev.json.meetings.active === null);
     client.res.destroy();
     await delay(200);
   }

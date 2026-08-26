@@ -13,7 +13,15 @@
  *                      broadcast happen automatically downstream (D2)
  *   GET  /api/inbox    ?role=&include_answered=1 → {pending,answered_recent}
  *                      via the SAME projection code as MCP inbox_list (§3.1)
- *   POST /api/phone    501 stub — rate-limited, size-capped, JSON-validated (Phase 5)
+ *   POST /api/phone    {audio_base64, mime, transcript?, lang?, duration_ms}
+ *                      → magic-sniffed, size-capped, stored under
+ *                      office/phone/<stamp>.<ext> (+ sidecar json), then the
+ *                      PAIRED events append under one lock (Phase 5 §6.3/D5);
+ *                      mirrors + SSE broadcast happen automatically (D2).
+ *                      Without the writer dep it still answers 501 honestly.
+ *   GET  /api/audio/<f> audio/webm|mp4|ogg stream — ONLY files inside
+ *                      office/phone/ (strict server-generated-name regex +
+ *                      realpath containment; traversal → 403/404)
  *   OPTIONS *          204 + CORS preflight (file:// pages have an opaque origin)
  *   GET/HEAD static    office/ subtree first, then templates/ (read-only),
  *                      realpath-contained; traversal attempts → 403
@@ -56,8 +64,18 @@ const CONTENT_TYPES = {
   '.ico': 'image/x-icon',
   '.webm': 'video/webm',
   '.mp4': 'video/mp4',
+  '.ogg': 'audio/ogg',
   '.woff2': 'font/woff2',
 };
+
+/* Phase 5: /api/audio serves ONLY recorded calls — honest audio mimes
+   (static office/ serving keeps its generic table above). */
+const PHONE_AUDIO_TYPES = {
+  '.webm': 'audio/webm',
+  '.mp4': 'audio/mp4',
+  '.ogg': 'audio/ogg',
+};
+const PHONE_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_-]*\.(webm|mp4|ogg)$/;
 
 class HttpError extends Error {
   constructor(status, code) {
@@ -82,6 +100,9 @@ function createHttpApi(deps) {
   const postMessage = typeof d.postMessage === 'function' ? d.postMessage : null;
   const inboxProject = typeof d.inboxProject === 'function' ? d.inboxProject : null;
   const staticRoots = Array.isArray(d.staticRoots) ? d.staticRoots.map((r) => path.resolve(r)) : [];
+  const postPhoneCall = typeof d.postPhoneCall === 'function' ? d.postPhoneCall : null;
+  const phoneAudioDir =
+    typeof d.phoneAudioDir === 'string' && d.phoneAudioDir ? path.resolve(d.phoneAudioDir) : null;
   const bodyLimit = intOpt(d.bodyLimitBytes, DEFAULT_BODY_LIMIT_BYTES);
   const rateMax = intOpt(d.rateLimitMax, RATE_MAX_DEFAULT);
   const rateWindowMs = intOpt(d.rateLimitWindowMs, RATE_WINDOW_MS_DEFAULT);
@@ -219,6 +240,64 @@ function createHttpApi(deps) {
     throw new HttpError(escaped ? 403 : 404, escaped ? 'forbidden' : 'not_found');
   }
 
+  /* ------- Phase 5: playback of stored calls (office/phone ONLY) ------- */
+
+  function servePhoneAudio(rawName, req, res) {
+    if (!phoneAudioDir) {
+      notImplemented(res);
+      return;
+    }
+    let name;
+    try {
+      name = decodeURIComponent(String(rawName));
+    } catch (_) {
+      throw new HttpError(400, 'bad_path');
+    }
+    /* Layer 1: server-generated names only — the strict regex rejects
+     * separators, '..', encoded traversal, everything, BEFORE any fs call. */
+    if (!PHONE_NAME_RE.test(name)) throw new HttpError(404, 'not_found');
+    /* Layer 2: resolve + realpath containment inside office/phone/ (R4). */
+    const target = path.resolve(phoneAudioDir, name);
+    if (!target.startsWith(phoneAudioDir + path.sep)) throw new HttpError(403, 'forbidden');
+    let real;
+    let realRoot;
+    try {
+      real = fs.realpathSync(target);
+      realRoot = fs.realpathSync(phoneAudioDir);
+    } catch (_) {
+      throw new HttpError(404, 'not_found'); // missing dir/file — no info leak
+    }
+    if (real !== realRoot && !real.startsWith(realRoot + path.sep)) {
+      throw new HttpError(403, 'forbidden');
+    }
+    let st;
+    try {
+      st = fs.statSync(real);
+    } catch (_) {
+      throw new HttpError(404, 'not_found');
+    }
+    if (!st.isFile()) throw new HttpError(404, 'not_found');
+    const type = PHONE_AUDIO_TYPES[path.extname(real).toLowerCase()] || 'application/octet-stream';
+    const headers = {
+      'Content-Type': type,
+      'Content-Length': String(st.size),
+      'Cache-Control': 'no-cache',
+      'Accept-Ranges': 'none',
+    };
+    if (req.method === 'HEAD') {
+      send(res, 200, headers);
+      return;
+    }
+    res.writeHead(200, baseHeaders(headers));
+    const stream = fs.createReadStream(real);
+    stream.on('error', () => {
+      try {
+        res.destroy();
+      } catch (_) { /* socket already gone */ }
+    });
+    stream.pipe(res);
+  }
+
   /* ------------- routing ------------- */
 
   async function route(req, res) {
@@ -310,7 +389,14 @@ function createHttpApi(deps) {
       return;
     }
 
-    /* Phase 5 telephone exchange — contract visible, nothing fake answers. */
+    /* ---- Phase 5 telephone exchange (plan §6.3/D5): playback + intake ---- */
+
+    if (p.startsWith('/api/audio/')) {
+      if (req.method !== 'GET' && req.method !== 'HEAD') throw new HttpError(405, 'method_not_allowed');
+      servePhoneAudio(p.slice('/api/audio/'.length), req, res);
+      return;
+    }
+
     if (p === '/api/phone') {
       if (req.method !== 'POST') throw new HttpError(405, 'method_not_allowed');
       if (rateLimited(req)) {
@@ -322,8 +408,39 @@ function createHttpApi(deps) {
         sendJson(res, 413, { ok: false, error: 'payload_too_large' });
         return;
       }
-      parseJsonBody(body);
-      notImplemented(res);
+      const parsed = parseJsonBody(body);
+      if (!postPhoneCall) {
+        notImplemented(res); // contract visible, nothing fake answers
+        return;
+      }
+      const r = await postPhoneCall({
+        audio_base64: parsed.audio_base64,
+        mime: parsed.mime,
+        transcript: parsed.transcript === undefined ? null : parsed.transcript,
+        lang: parsed.lang,
+        duration_ms: parsed.duration_ms,
+        ip: (req.socket && req.socket.remoteAddress) || 'unknown',
+        source: 'web',
+      });
+      if (r && r.ok) {
+        sendJson(res, 200, {
+          ok: true,
+          call_id: r.call_id,
+          event_id: r.event_id,
+          message_id: r.message_id,
+          audio_ref: r.audio_ref,
+          audio_url: r.audio_url,
+        });
+        return;
+      }
+      const status = r && r.error === 'audio_too_large' ? 413
+        : (r && r.error === 'unsupported_audio') ? 415
+        : 400;
+      sendJson(res, status, {
+        ok: false,
+        error: (r && r.error) || 'invalid_phone_call',
+        reasons: (r && r.reasons) || [(r && r.error) || 'rejected'],
+      });
       return;
     }
 

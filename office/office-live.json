@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0",
-  "generated_ts": "2026-08-26T09:04:37.762Z",
+  "generated_ts": "2026-08-26T15:32:55.542Z",
   "note": "raw signals only — all animation logic lives in the dashboard app (plan §6.3)",
   "roles": [
     {
@@ -19,10 +19,10 @@
     },
     {
       "role": "orchestrator",
-      "active_role": true,
+      "active_role": false,
       "last_event_time": "2026-08-26T09:04:37.756Z",
-      "mood": "thinking",
-      "energy_hint": 100
+      "mood": "sleeping",
+      "energy_hint": 0
     },
     {
       "role": "executor",
