@@ -23,3 +23,10 @@ office/.lock
 # both stay local, the ledger events.log.jsonl remains tracked.
 office/batches/
 office/telemetry.jsonl
+
+# Telephone exchange «تلفنخانه» — real recorded voice (browser widget, CLI,
+# and the real-PSTN voip-inbox-poll.js intake) stays LOCAL ONLY. This repo's
+# GitHub remote is public; committing actual caller audio/voicemail would
+# publish real people's voices.
+office/phone/
+office/.voip-inbox-cursor.json

@@ -1,5 +1,3 @@
-'use strict';
-
 /*
  * phone.test — Phase 5 telephone exchange «تلفنخانه» (live-office plan
  * §1.4/§2/§6, D5/D6):
@@ -65,6 +63,14 @@ function webmBytes(size) {
     Buffer.from([0x1a, 0x45, 0xdf, 0xa3]),
     Buffer.alloc((size || 96) - 4, 0x42),
   ]);
+}
+
+/** Minimal but honest WAV: real RIFF/WAVE magic at bytes 0-4 and 8-12 (sniff-only). */
+function wavBytes(size) {
+  const buf = Buffer.alloc(size || 96, 0x00);
+  buf.write('RIFF', 0, 'latin1');
+  buf.write('WAVE', 8, 'latin1');
+  return buf;
 }
 
 function tmpWorkspace(tag) {
@@ -360,11 +366,13 @@ const compose = require('../src/live/compose');
     const b = await phoneCore.receiveCall({ audio_base64: webmBytes().toString('base64'), mime: 'audio/webm' });
     check('T5: back-to-back real calls both ok with DISTINCT files',
       a.ok && b.ok && a.audio_ref !== b.audio_ref, JSON.stringify([a.audio_ref, b.audio_ref]));
-    check('T5: sniffContainer accepts webm/mp4/ogg magic only',
+    check('T5: sniffContainer accepts webm/mp4/ogg/wav magic only',
       phoneCore.sniffContainer(webmBytes()) === 'webm' &&
       phoneCore.sniffContainer(Buffer.concat([Buffer.from('ABCD'), Buffer.from('ftyp'), Buffer.alloc(16)])) === 'mp4' &&
       phoneCore.sniffContainer(Buffer.from('OggS' + 'x'.repeat(20))) === 'ogg' &&
-      phoneCore.sniffContainer(Buffer.from('RIFF')) === null);
+      phoneCore.sniffContainer(wavBytes()) === 'wav' &&
+      phoneCore.sniffContainer(Buffer.from('RIFF')) === null && // too short to sniff at all
+      phoneCore.sniffContainer(Buffer.concat([Buffer.from('RIFF'), Buffer.alloc(20)])) === null); // RIFF w/o WAVE form type
   }
 
   /* ---------- T6: projection + honest answer join ---------- */
@@ -541,6 +549,32 @@ const compose = require('../src/live/compose');
     check('T9: CLI missing audio file exits 1 honestly', cliBad.code === 1);
 
     try { fs.unlinkSync(tmpAudio); } catch (_) { /* best effort */ }
+  }
+
+  /* ---------- T10: WAV intake (voip-inbox-poll.js telephony source) ---------- */
+  {
+    check('T10: mimeFamily recognizes audio/wav', phoneCore.mimeFamily('audio/wav') === 'wav');
+    const r = await phoneCore.receiveCall({
+      audio_base64: wavBytes().toString('base64'),
+      mime: 'audio/wav',
+      transcript: null,
+      lang: 'fa-IR',
+      duration_ms: 4690,
+      to_role: 'ceo',
+      source: 'voip',
+      ip: '26807926',
+    });
+    check('T10: receiveCall accepts a real RIFF/WAVE buffer', r && r.ok === true, JSON.stringify(r));
+    check('T10: audio_ref keeps the real .wav extension (honest Content-Type)',
+      /\.wav$/i.test(String(r.audio_ref)), JSON.stringify(r));
+    check('T10: has_transcript stays false — no fabricated transcript',
+      r.has_transcript === false, JSON.stringify(r));
+    const sidePath = path.join(store.WORKSPACE, r.audio_ref.replace(/\//g, path.sep)).replace(/\.wav$/i, '.json');
+    const side = JSON.parse(fs.readFileSync(sidePath, 'utf8'));
+    check('T10: sidecar records source "voip" (distinct from web/cli)',
+      side.source === 'voip' && side.mime === 'audio/wav', JSON.stringify(side));
+    const call = store.readEvents().find((e) => e.action === 'phone_call_received' && e.call_id === r.call_id);
+    check('T10: ledger event mime is audio/wav', !!call && call.mime === 'audio/wav', JSON.stringify(call));
   }
 
   console.log(`\nphone: ${pass} pass, ${fail} fail`);

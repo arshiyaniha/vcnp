@@ -12,6 +12,21 @@
 - Keep files under 500 lines
 - Validate input at system boundaries
 
+## VCNP Vibe-Office (Claude Code Desktop)
+
+This repo is a multi-agent "virtual office" kit (design: [`plans/vcnp-vibe-office-plan.md`](plans/vcnp-vibe-office-plan.md), live layer: [`plans/live-office-plan.md`](plans/live-office-plan.md)). It was originally built for **Roo Code** (`.roomodes.json` custom modes + `adapters/roo/rules/`), and now has an equivalent **Claude Code Desktop** surface — same charters, same MCP server, same shared ledger, just exposed through Claude Code's own mechanisms instead of Roo's mode picker:
+
+| Roo mechanism | Claude Code equivalent |
+|---|---|
+| `.roomodes.json` custom mode (e.g. `vcnp-ceo`) | Subagent `.claude/agents/vcnp/vcnp-ceo.md` — spawn with the Agent tool, `subagent_type: "vcnp-ceo"` |
+| Switching the mode picker to `vcnp-ceo` | Slash command `/vcnp:ceo` — adopts the role for the rest of the current conversation |
+| `adapters/roo/rules/*.md` (always-on rules) | Same files, referenced directly from every `.claude/agents/vcnp/*.md` and `.claude/commands/vcnp/*.md` — the Office Presence + Inbox Duty protocols are NOT Roo-specific, they're MCP tool calls |
+| RooCode's built-in MCP client reading `.mcp.json` | Claude Code Desktop reads the SAME `.mcp.json` — the `vcnp-office` server needs zero changes |
+
+All 9 roles (`ceo`, `planner`, `orchestrator`, `executor`, `qa`, `security`, `resource-controller`, `librarian`, `devops`) exist as both a subagent and a slash command. The single source of truth for each role's behavior is still its charter in [`core/charters/`](core/charters/) plus [`core/constitution.md`](core/constitution.md) and [`core/protocol.md`](core/protocol.md) — the Claude Code files are thin adapters that point back at those, exactly like the Roo adapter does. If you edit a charter, the Roo mode, the Claude Code subagent, and the Claude Code slash command all read it live (nothing is duplicated text that can drift), except each `.claude/agents/vcnp/*.md`'s own "Core Duty"/"Never Does" quick-glance summary — regenerate those from the charter if it changes materially.
+
+To run a multi-role session in Claude Code the way Roo's mode-switching + `new_task` handoff works: spawn the roles you need with the Agent tool (name them, e.g. `name: "orchestrator"`), and let them coordinate via `SendMessage` and the shared office board (`task_create`/`task_update`/`task_assign` through the `vcnp-office` MCP server) — see "Agent Comms" further down this file for the general pattern.
+
 ## Ruflo Capability Brain & Implementation Loop
 
 Ruflo is the coordination ledger and policy decision point. Claude Code is the

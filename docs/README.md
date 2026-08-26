@@ -32,9 +32,19 @@
 
 ## 🚀 How to Start | شروع
 
+### Option A — VS Code + RooCode
+
 1. Open this folder in **VS Code + RooCode**.
 2. Switch to the **`vcnp-ceo` mode** (mode selector at the bottom of the chat). The CEO charter bootstraps the office: it reads `office/BOARD.md`, consults the constitution (`core/constitution.md`) and protocol (`core/protocol.md`), then plans/dispatches work through the other `vcnp-*` modes.
 3. Talk to it like a CEO: describe the goal; tasks appear on the board.
+
+### Option B — Claude Code Desktop
+
+The same 9 roles are available as native Claude Code subagents + slash commands (adapter: [`adapters/claude-code/`](../adapters/claude-code/); mapping table in the project [`CLAUDE.md`](../CLAUDE.md)):
+
+1. Open this folder in **Claude Code Desktop** — it auto-registers the `vcnp-office` MCP server from [`.mcp.json`](../.mcp.json).
+2. Type **`/vcnp:ceo`** to adopt the General Manager role for the conversation, or ask Claude to spawn it with the Agent tool (`subagent_type: "vcnp-ceo"`) if you want it delegating to other `vcnp-*` subagents (`vcnp-planner`, `vcnp-orchestrator`, `vcnp-executor`, …) rather than acting alone.
+3. Talk to it like a CEO, same as Option A — it reads the same charters, writes to the same ledger, and the board/dashboard/live office all work identically regardless of which editor is driving.
 
 ## 🔌 MCP Server & Tests | سرور و تست‌ها
 
@@ -80,6 +90,7 @@ npm run live     # node src/live-server.js — binds 127.0.0.1:7788 (env VCNP_OF
 * **Chat** (Scenario A "honest queue"): type a message to a role in the UI, or `POST /api/message`, or `node tools/phone-drop.js --text "..."` from the CLI — all three append a `message_posted` ledger event through the identical write path. A real `vcnp-ceo`/`vcnp-orchestrator` session drains it via the `inbox_list`/`inbox_reply` MCP tools. Nothing is answered automatically — an unanswered message shows «در انتظار نشست» (awaiting session), never a simulated reply.
 * **تلفنخانه (Telephone exchange)**: click «☎ تماس با مدیر» in the browser (requires `http://localhost:7788` — mic access is blocked on `file://`) to record and send a voice note, or drop one from the CLI: `node tools/phone-drop.js --audio path\to\note.webm [--transcript "..."]`. Both paths write `office/phone/<stamp>.webm` + a sidecar JSON and append the same paired `phone_call_received` + `message_posted` events.
 * **End-to-end proof**: `node demo/run-live-office.js` boots the server on an ephemeral port, posts a web message, drops a phone-exchange text note via the CLI, watches both arrive over its own SSE connection, and confirms the mirrors were regenerated — exits 0 only if every step is verified live (no simulated output).
+* **Real PSTN intake** (`tools/voip-inbox-poll.js`): a third door into تلفنخانه, alongside the browser widget and `phone-drop.js` — polls a remote voicemail-inbox HTTP API (a separate service you run, e.g. an Asterisk agent extension) and feeds each real voice message through the identical `receiveCall()` write path, so a real phone call produces the same `phone_call_received` + `message_posted` ledger pair as the other two doors. Recordings arrive as 8kHz mono WAV (not a browser codec), which is why the phone-exchange validators (`events-validate.js`, `phone-core.js`) accept `audio/wav` alongside `webm`/`mp4`/`ogg`. Never fabricates a transcript — if the remote service hasn't transcribed a call, `transcript` stays `null`, exactly like a failed Web Speech attempt in the browser. Run with `VOIP_INBOX_TOKEN=... node tools/voip-inbox-poll.js` (env-configured; see the script's header comment for every variable and the exact polling/backoff/dedupe contract it honors).
 
 ---
 
@@ -100,7 +111,9 @@ npm run live     # node src/live-server.js — binds 127.0.0.1:7788 (env VCNP_OF
 
 ## شروع سریع
 
-۱. پوشه را در **VS Code + RooCode** باز کنید. ۲. به حالت **`vcnp-ceo`** سوییچ کنید؛ مدیرعامل دفتر را راه می‌اندازد و کارها را به سایر حالت‌ها می‌سپارد. ۳. هدف خود را بگویید؛ تسک‌ها روی تخته ظاهر می‌شوند.
+**گزینهٔ الف — VS Code + RooCode:** ۱. پوشه را باز کنید. ۲. به حالت **`vcnp-ceo`** سوییچ کنید؛ مدیرعامل دفتر را راه می‌اندازد و کارها را به سایر حالت‌ها می‌سپارد. ۳. هدف خود را بگویید؛ تسک‌ها روی تخته ظاهر می‌شوند.
+
+**گزینهٔ ب — Claude Code Desktop:** هر ۹ نقش به‌صورت subagent و دستور اسلش هم در دسترس‌اند (جزئیات: [`adapters/claude-code/`](../adapters/claude-code/)). پوشه را در Claude Code Desktop باز کنید (سرور MCP به‌طور خودکار از `.mcp.json` ثبت می‌شود)، دستور **`/vcnp:ceo`** را بزنید یا از ابزار Agent با `subagent_type: "vcnp-ceo"` استفاده کنید — بقیهٔ مسیر دقیقاً مثل گزینهٔ الف است، چون هر دو از یک منشور، یک دفتر رویداد و یک سرور MCP استفاده می‌کنند.
 
 ## اجرای سرور و تست‌ها
 

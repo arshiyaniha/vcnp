@@ -42,10 +42,15 @@ const V = require('../lib/events-validate');
 
 const PHONE_DIR_REL = 'office/phone';
 const PHONE_RECENT_LIMIT = 8;      // bounded window for composed payload (§1.4)
-/* D5: ≤2 min Opus ≈ 0.5 MB ⇒ 1 MiB decoded cap is generous headroom while
- * keeping localhost bodies small. Base64 inflates ~4/3 (~1.4 MB), inside the
- * HTTP body limit (2 MB). */
-const MAX_AUDIO_BYTES = 1024 * 1024;
+/* D5: browser uploads (audio_base64 over HTTP, POST /api/phone) are ≤2 min
+ * compressed Opus ≈ 0.5 MB, comfortably inside the HTTP body limit (2 MB
+ * base64-inflated). The VoIP telephone-exchange intake (voip-inbox-poll.js,
+ * KB voice inbox 108) calls receiveCall() directly in-process — same as the
+ * CLI — so it never touches that HTTP body limit, but it delivers
+ * UNCOMPRESSED 8kHz/16-bit/mono WAV: the documented 120s hard cap on that
+ * line is 8000 * 2 * 120 = 1,920,000 bytes. 2 MiB covers the full 120s WAV
+ * case plus headroom for the WAV header and any future codec. */
+const MAX_AUDIO_BYTES = 2 * 1024 * 1024;
 const MIN_AUDIO_BYTES = 12;        // smallest buffer the magic-sniff can judge
 const NO_TRANSCRIPT_TEXT = '[voice message - no transcript]'; // §6.3 verbatim
 const EBML_MAGIC = Buffer.from([0x1a, 0x45, 0xdf, 0xa3]);     // Matroska/WebM
@@ -74,11 +79,17 @@ function sniffContainer(buf) {
   if (buf.subarray(0, 4).equals(EBML_MAGIC)) return 'webm';
   if (buf.subarray(4, 8).toString('latin1') === 'ftyp') return 'mp4';
   if (buf.subarray(0, 4).toString('latin1') === 'OggS') return 'ogg';
+  // RIFF....WAVE — telephony recordings (voip-inbox-poll.js), not a browser
+  // MediaRecorder container. Needs both the outer RIFF chunk and the WAVE
+  // form type at byte 8, per the standard RIFF/WAVE layout.
+  if (buf.subarray(0, 4).toString('latin1') === 'RIFF' && buf.subarray(8, 12).toString('latin1') === 'WAVE') {
+    return 'wav';
+  }
   return null;
 }
 
 function mimeFamily(mime) {
-  const m = /^audio\/(webm|mp4|ogg)(;|$)/i.exec(String(mime || '').trim());
+  const m = /^audio\/(webm|mp4|ogg|wav)(;|$)/i.exec(String(mime || '').trim());
   return m ? m[1].toLowerCase() : null;
 }
 
@@ -185,7 +196,7 @@ function fail(error, reasons) {
 function surfaceReasons(input, container) {
   const reasons = [];
   if (typeof input.mime !== 'string' || !V.MIME_RE.test(input.mime.trim())) {
-    reasons.push("'mime' must be audio/webm, audio/mp4 or audio/ogg (optional ;codecs=…)");
+    reasons.push("'mime' must be audio/webm, audio/mp4, audio/ogg or audio/wav (optional ;codecs=…)");
   } else {
     const fam = mimeFamily(input.mime);
     if (fam !== container) {
@@ -219,7 +230,8 @@ function surfaceReasons(input, container) {
  */
 async function receiveCall(args) {
   const input = args || {};
-  const source = input.source === 'cli' ? 'cli' : 'web';
+  const KNOWN_SOURCES = ['cli', 'voip', 'web'];
+  const source = KNOWN_SOURCES.includes(input.source) ? input.source : 'web';
 
   /* ---- decode + sniff BEFORE any disk or ledger effect ---- */
   let b64 = typeof input.audio_base64 === 'string' ? input.audio_base64.trim() : '';
@@ -245,7 +257,7 @@ async function receiveCall(args) {
   const container = sniffContainer(buf);
   if (!container) {
     return fail('unsupported_audio', [
-      'content does not look like webm/mp4/ogg audio (magic-byte sniff failed)',
+      'content does not look like webm/mp4/ogg/wav audio (magic-byte sniff failed)',
     ]);
   }
   const preReasons = surfaceReasons(input, container);
@@ -257,7 +269,7 @@ async function receiveCall(args) {
   const lang = input.lang === undefined ? V.LANG_DEFAULT : input.lang;
   const duration_ms = input.duration_ms === undefined || input.duration_ms === null ? 0 : input.duration_ms;
   const to_role = input.to_role === undefined ? 'ceo' : input.to_role;
-  const ip = typeof input.ip === 'string' && input.ip ? input.ip : (source === 'cli' ? 'cli' : 'unknown');
+  const ip = typeof input.ip === 'string' && input.ip ? input.ip : (source === 'web' ? 'unknown' : source);
 
   /* ---- storage: office/phone/<stamp>.<ext> + sidecar (never overwrite) ---- */
   const dir = phoneDir();

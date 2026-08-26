@@ -19,7 +19,7 @@
  *                      PAIRED events append under one lock (Phase 5 §6.3/D5);
  *                      mirrors + SSE broadcast happen automatically (D2).
  *                      Without the writer dep it still answers 501 honestly.
- *   GET  /api/audio/<f> audio/webm|mp4|ogg stream — ONLY files inside
+ *   GET  /api/audio/<f> audio/webm|mp4|ogg|wav stream — ONLY files inside
  *                      office/phone/ (strict server-generated-name regex +
  *                      realpath containment; traversal → 403/404)
  *   OPTIONS *          204 + CORS preflight (file:// pages have an opaque origin)
@@ -74,8 +74,9 @@ const PHONE_AUDIO_TYPES = {
   '.webm': 'audio/webm',
   '.mp4': 'audio/mp4',
   '.ogg': 'audio/ogg',
+  '.wav': 'audio/wav',
 };
-const PHONE_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_-]*\.(webm|mp4|ogg)$/;
+const PHONE_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_-]*\.(webm|mp4|ogg|wav)$/;
 
 class HttpError extends Error {
   constructor(status, code) {

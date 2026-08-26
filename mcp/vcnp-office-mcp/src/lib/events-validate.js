@@ -30,9 +30,11 @@ const CALL_ID_RE = /^ph-\d{4}$/; // ph-NNNN, allocated under the office lock (pl
 /* plan §2 pins audio_ref to office/phone/<file>.webm (Chrome reference browser).
  * Edge/Safari fall back to audio/mp4|ogg containers (§6.2 preference chain); those
  * are stored under their REAL extension so playback Content-Type stays honest —
- * hence the small superset here. Server-generated names only: stamp + counter. */
-const AUDIO_REF_RE = /^office\/phone\/([A-Za-z0-9][A-Za-z0-9_-]*)\.(webm|mp4|ogg)$/;
-const MIME_RE = /^audio\/(webm|mp4|ogg)(;codecs=[A-Za-z0-9,._\- ]+)?$/i;
+ * hence the small superset here. `wav` was added for the VoIP telephone-exchange
+ * intake (tools/voip-inbox-poll.js): real PSTN recordings are 8kHz mono PCM WAV,
+ * not a browser MediaRecorder container. Server-generated names only: stamp + counter. */
+const AUDIO_REF_RE = /^office\/phone\/([A-Za-z0-9][A-Za-z0-9_-]*)\.(webm|mp4|ogg|wav)$/;
+const MIME_RE = /^audio\/(webm|mp4|ogg|wav)(;codecs=[A-Za-z0-9,._\- ]+)?$/i;
 const LANG_DEFAULT = 'fa-IR'; // plan §2: lang:"fa-IR" (CLI --lang may pick another tag)
 const LANG_RE = /^[a-zA-Z]{2,3}(-[A-Za-z0-9]{2,8})*$/;
 /* The transcript becomes the paired message_posted text verbatim (§6.3), so it
@@ -276,10 +278,10 @@ function validatePhoneCallReceived(input) {
     }
   }
   if (typeof input.audio_ref !== 'string' || !AUDIO_REF_RE.test(input.audio_ref)) {
-    reasons.push(`'audio_ref' must match office/phone/<name>.(webm|mp4|ogg) (got ${JSON.stringify(input.audio_ref)})`);
+    reasons.push(`'audio_ref' must match office/phone/<name>.(webm|mp4|ogg|wav) (got ${JSON.stringify(input.audio_ref)})`);
   }
   if (typeof input.mime !== 'string' || !MIME_RE.test(input.mime)) {
-    reasons.push("'mime' must be audio/webm, audio/mp4 or audio/ogg (optional ;codecs=…)");
+    reasons.push("'mime' must be audio/webm, audio/mp4, audio/ogg or audio/wav (optional ;codecs=…)");
   }
   if (!Number.isInteger(input.duration_ms) || input.duration_ms < 0) {
     reasons.push("'duration_ms' must be an integer >= 0");

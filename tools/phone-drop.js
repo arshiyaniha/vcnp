@@ -38,7 +38,7 @@ function usage(code) {
   process.stderr.write(
     'usage: node tools/phone-drop.js --text "متن" [--to ceo]\n' +
     '       node tools/phone-drop.js "متن پیام"\n' +
-    '       node tools/phone-drop.js --audio <file.webm|mp4|ogg> [--transcript "..."] ' +
+    '       node tools/phone-drop.js --audio <file.webm|mp4|ogg|wav> [--transcript "..."] ' +
     '[--lang fa-IR] [--to ceo]\n'
   );
   process.exit(code);
