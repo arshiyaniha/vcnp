@@ -12,7 +12,8 @@
  *   port     VCNP_OFFICE_PORT (design-doc name) → VCNP_LIVE_PORT (alias)
  *            → 7788 default; 0 = ephemeral (useful for tests)
  *   routes   GET /api/data · GET /api/stream (SSE) · GET /healthz
- *            POST /api/message · POST /api/phone · GET /api/inbox → 501 stubs
+ *            POST /api/message (Phase 3 chat) · GET /api/inbox (Phase 3)
+ *            POST /api/phone → 501 stub until Phase 5
  *            static: office/ then templates/ (read-only, containment-checked)
  *   writes   confined to office/ (mirror regen + .mirrors-stamp only)
  *
@@ -27,6 +28,7 @@ const path = require('path');
 
 const store = require('./store');
 const compose = require('./live/compose');
+const inboxCore = require('./live/inbox-core');
 const { createSseHub } = require('./live/sse');
 const { startWatcher } = require('./live/watcher');
 const { createHttpApi } = require('./live/http-api');
@@ -59,6 +61,9 @@ async function main() {
       const events = store.readEvents();
       return { events: events.length, seq: events.length, stamp: store.ledgerStamp() };
     },
+    // Phase 3 chat writers — same code path as the MCP inbox tools (§3.1).
+    postMessage: (args) => inboxCore.postMessage(args),
+    inboxProject: (opts) => inboxCore.projectInbox(store.readEvents(), opts),
     staticRoots: [store.OFFICE_DIR, path.join(store.WORKSPACE, 'templates')],
   });
 

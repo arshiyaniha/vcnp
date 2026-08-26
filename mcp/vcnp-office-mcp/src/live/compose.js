@@ -27,6 +27,7 @@
 
 const store = require('../store');
 const report = require('../tools/report');
+const inbox = require('./inbox-core');
 
 const RECENT_EVENTS_LIMIT = 25; // parity with tools/report.js
 
@@ -53,8 +54,17 @@ function build(opts) {
     live,
     generated_at: now,
     recent_events,
-    /* Phase 3+: honest empty queue — renderers show «awaiting session». */
-    chat: { messages: [], inbox: { total_pending: 0, pending_by_role: {} } },
+    /* Phase 3 (§1.4): REAL chat projections — threads joined server-side,
+     * pending counts, and the honest session_active hint. Empty ledger ⇒
+     * empty arrays / all-false hints; nothing is ever synthesized. */
+    chat: {
+      messages: inbox.joinThreads(events, inbox.CHAT_MESSAGES_LIMIT),
+      inbox: (() => {
+        const proj = inbox.projectInbox(events, {});
+        return { total_pending: proj.total_pending, pending_by_role: proj.pending_by_role };
+      })(),
+      session_active: inbox.deriveSessionActive(events),
+    },
     meetings: { active: null, recent: [] },
     phone: { recent: [] },
     server: { live: true, ledger_seq: events.length, port },

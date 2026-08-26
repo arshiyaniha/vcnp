@@ -232,4 +232,5 @@ module.exports = {
   tunables,
   MOOD_BY_ACTION,
   MEETING_FALLBACK_RE,
+  ROLES, // single role registry (live-office plan §2 validators consume it)
 };

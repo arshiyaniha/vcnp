@@ -14,8 +14,11 @@
  *   C4  watcher dedupe: exactly ONE mirror regen per real append (post-append
  *       hook does it; watcher skips via .mirrors-stamp), duplicates and
  *       unrelated office/ noise trigger nothing
- *   C5  future endpoints answer 501 {"ok":false,"error":"not_implemented_yet"};
- *       malformed JSON → 400; oversized body → 413; rate limit → 429
+ *   C5  Phase 3 endpoints ACTIVE: POST /api/message validation + append,
+ *       GET /api/inbox projection, /api/phone still 501; malformed JSON → 400;
+ *       oversized body → 413; rate limit → 429
+ *   C9  chat loop e2e: POST → ledger → SSE payload carries the thread →
+ *       session-style reply joins the answer; second reply rejected
  *   C6  GET /healthz: ok + uptime + ledger stats off disk
  *   C7  static serving containment: / serves office/dashboard.html,
  *       encoded traversal → 403, missing → 404
@@ -242,6 +245,7 @@ async function main() {
   process.env.VCNP_OFFICE_WORKSPACE = wsA; // MUST precede src requires
 
   const store = require('../src/store');
+  const inboxCore = require('../src/live/inbox-core');
   const reportMod = require('../src/tools/report');
   const mirrors = require('../src/hooks/mirrors');
   const compose = require('../src/live/compose');
@@ -286,6 +290,10 @@ async function main() {
     check('C1: chat = honest empty queue',
       Array.isArray(p.chat.messages) && p.chat.messages.length === 0 &&
       p.chat.inbox.total_pending === 0 && deepEqual(p.chat.inbox.pending_by_role, {}));
+    check('C1: chat.session_active honest hint shape (by_role for all 9 roles)',
+      p.chat.session_active && p.chat.session_active.by_role &&
+      Object.keys(p.chat.session_active.by_role).length === 9 &&
+      Object.values(p.chat.session_active.by_role).every((v) => typeof v === 'boolean'));
     check('C1: meetings/phone empty shapes',
       p.meetings.active === null && Array.isArray(p.meetings.recent) && p.meetings.recent.length === 0 &&
       Array.isArray(p.phone.recent) && p.phone.recent.length === 0);
@@ -303,6 +311,9 @@ async function main() {
       seq: store.readEvents().length,
       stamp: store.ledgerStamp(),
     }),
+    // Phase 3 wiring — identical to src/live-server.js production deps:
+    postMessage: (args) => inboxCore.postMessage(args),
+    inboxProject: (opts) => inboxCore.projectInbox(store.readEvents(), opts),
     staticRoots: [path.join(wsA, 'office')],
     rateLimitMax: 1000, // dedicated limiter server covers 429 below
   });
@@ -400,23 +411,52 @@ async function main() {
     }
   }
 
-  /* ---- C5: 501 stubs, body limits, JSON errors, router hygiene ---- */
+  /* ---- C5: Phase 3 endpoints ACTIVE; phone still stubbed; guards intact ---- */
   {
     let r = await request(portA, '/api/message', {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ to_role: 'ceo', text: 'hi' }),
+      body: JSON.stringify({ to_role: 'ceo', text: 'سلام از تست C5' }),
     });
-    check('C5: POST /api/message → 501 not_implemented_yet',
-      r.status === 501 && r.json && r.json.ok === false && r.json.error === 'not_implemented_yet');
+    check('C5: POST /api/message happy → 200 {ok,event_id,message_id:m-NNNN}',
+      r.status === 200 && r.json.ok === true && typeof r.json.event_id === 'string' &&
+      /^m-\d{4}$/.test(r.json.message_id || ''), JSON.stringify(r.json));
+    const firstMsgId = r.json.message_id;
+    r = await request(portA, '/api/message', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ to_role: 'bigboss', text: 'hi' }),
+    });
+    check('C5: unknown to_role → 400 invalid_message with reasons',
+      r.status === 400 && r.json.ok === false && r.json.error === 'invalid_message' &&
+      Array.isArray(r.json.reasons) && r.json.reasons.some((x) => /to_role/.test(x)),
+      JSON.stringify(r.json));
+    r = await request(portA, '/api/message', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ to_role: 'ceo', text: '   ' }),
+    });
+    check('C5: empty (whitespace) text → 400', r.status === 400 && r.json.error === 'invalid_message');
+    r = await request(portA, '/api/message', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ to_role: 'ceo', text: 'x'.repeat(2001) }),
+    });
+    check('C5: oversized text (2001 chars) → 400 with cap reason',
+      r.status === 400 && Array.isArray(r.json.reasons) && r.json.reasons.some((x) => /2000/.test(x)));
     r = await request(portA, '/api/message', { method: 'POST', body: '{oops' });
     check('C5: malformed JSON body → 400 invalid_json', r.status === 400 && r.json.error === 'invalid_json');
+    r = await request(portA, '/api/inbox?role=ceo');
+    check('C5: GET /api/inbox → 200 projection listing the posted message pending',
+      r.status === 200 && r.json.ok === true && Array.isArray(r.json.pending) &&
+      r.json.pending.some((m) => m.message_id === firstMsgId && m.to_role === 'ceo'), r.status);
+    check('C5: /api/inbox totals consistent (total_pending == pending.length)',
+      typeof r.json.total_pending === 'number' && r.json.total_pending === r.json.pending.length &&
+      r.json.pending_by_role.ceo >= 1);
+    r = await request(portA, '/api/inbox?role=qa');
+    check('C5: /api/inbox role filter keeps only that role',
+      r.status === 200 && r.json.pending.every((m) => m.to_role === 'qa'));
     r = await request(portA, '/api/phone', {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ audio_base64: 'AAAA' }),
     });
-    check('C5: POST /api/phone → 501', r.status === 501 && r.json.error === 'not_implemented_yet');
-    r = await request(portA, '/api/inbox?role=ceo');
-    check('C5: GET /api/inbox → 501', r.status === 501 && r.json.error === 'not_implemented_yet');
+    check('C5: POST /api/phone → 501 (Phase 5)', r.status === 501 && r.json.error === 'not_implemented_yet');
     r = await request(portA, '/api/message', {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ text: 'x'.repeat(3 * 1024 * 1024) }),
@@ -431,20 +471,85 @@ async function main() {
       r.status === 204 && r.headers['access-control-allow-origin'] === '*');
   }
 
-  /* ---- C5b: rate limiting on the writable surface ---- */
+  /* ---- C5b: rate limiting on the writable surface (valid bodies now land) -- */
   {
     const sseMini = createSseHub();
-    const apiMini = createHttpApi({ sse: sseMini, port: 0, rateLimitMax: 2, rateLimitWindowMs: 60000 });
+    const apiMini = createHttpApi({
+      sse: sseMini,
+      port: 0,
+      rateLimitMax: 2,
+      rateLimitWindowMs: 60000,
+      postMessage: (args) => inboxCore.postMessage(args),
+      inboxProject: (opts) => inboxCore.projectInbox(store.readEvents(), opts),
+    });
     const srvMini = http.createServer(apiMini.handler);
     const portM = await listen(srvMini, 0);
-    const s1 = await request(portM, '/api/message', { method: 'POST', body: '{}' });
-    const s2 = await request(portM, '/api/message', { method: 'POST', body: '{}' });
-    const s3 = await request(portM, '/api/message', { method: 'POST', body: '{}' });
-    check('C5b: sliding-window limiter → 501,501,429',
-      s1.status === 501 && s2.status === 501 && s3.status === 429 && s3.json.error === 'rate_limited',
+    const body = JSON.stringify({ to_role: 'ceo', text: 'C5b rate probe' });
+    const hdr = { 'content-type': 'application/json' };
+    const s1 = await request(portM, '/api/message', { method: 'POST', headers: hdr, body });
+    const s2 = await request(portM, '/api/message', { method: 'POST', headers: hdr, body });
+    const s3 = await request(portM, '/api/message', { method: 'POST', headers: hdr, body });
+    check('C5b: sliding-window limiter → 200,200,429',
+      s1.status === 200 && s2.status === 200 && s3.status === 429 && s3.json.error === 'rate_limited',
       `${s1.status},${s2.status},${s3.status}`);
     sseMini.close();
     await new Promise((res) => srvMini.close(res));
+  }
+
+  /* ---- C9: chat loop e2e — POST → ledger → SSE payload → session reply ---- */
+  {
+    const client = await sseConnect(portA);
+    await nextPayloadFrame(client, 5000, 'C9 initial snapshot'); // drain snapshot
+    const MARK = 'e2e-chat-' + Date.now();
+    let r = await request(portA, '/api/message', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ to_role: 'orchestrator', text: MARK }),
+    });
+    check('C9: POST /api/message accepted', r.status === 200 && r.json.ok === true, String(r.status));
+    let ev = await nextPayloadFrame(client, 10000, 'C9 broadcast after POST');
+    let thread = (ev.json.chat.messages || []).find((m) => m.text === MARK);
+    check('C9: broadcast carries the new thread with answer:null',
+      !!thread && thread.answer === null && thread.to_role === 'orchestrator' &&
+      /^m-\d{4}$/.test(thread.message_id || ''), JSON.stringify(thread || {}).slice(0, 140));
+    check('C9: composed inbox counts include the pending message',
+      ev.json.chat.inbox.total_pending >= 1 && (ev.json.chat.inbox.pending_by_role.orchestrator || 0) >= 1);
+
+    // Drain EXACTLY like an MCP session would — same core as inbox_reply:
+    r = await request(portA, '/api/inbox?role=orchestrator');
+    const pend = (r.json.pending || []).find((m) => m.text === MARK);
+    check('C9: GET /api/inbox exposes the pending event_id for replying', !!pend && !!pend.event_id);
+    const rep = await inboxCore.replyMessage({
+      reply_to: pend.event_id, text: 'پاسخ آزمایشی C9', as_role: 'orchestrator',
+    });
+    check('C9: session-style reply accepted', rep.ok === true, JSON.stringify(rep));
+    const rep2 = await inboxCore.replyMessage({
+      reply_to: pend.event_id, text: 'تلاش دوم', as_role: 'ceo',
+    });
+    check('C9: SECOND reply honestly rejected (first-answer-wins)',
+      rep2.ok === false && /already answered by orchestrator/.test(rep2.error || ''), JSON.stringify(rep2));
+
+    ev = await nextPayloadFrame(client, 10000, 'C9 broadcast after reply');
+    thread = (ev.json.chat.messages || []).find((m) => m.text === MARK);
+    check('C9: answer joined into the thread via SSE payload',
+      !!thread && !!thread.answer && thread.answer.actor === 'orchestrator' &&
+      thread.answer.text === 'پاسخ آزمایشی C9', JSON.stringify((thread || {}).answer || {}));
+    check('C9: pending count drops to zero after the answer',
+      (ev.json.chat.inbox.pending_by_role.orchestrator || 0) === 0);
+
+    // XSS posture: the ledger stores DATA verbatim; escaping is renderer duty.
+    r = await request(portA, '/api/message', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ to_role: 'ceo', text: '<img src=x onerror=alert(1)>' }),
+    });
+    check('C9: XSS-looking text accepted as plain data', r.status === 200 && r.json.ok === true);
+    const data = await request(portA, '/api/data');
+    const xssThread = (data.json.chat.messages || []).find((m) => String(m.text || '').includes('<img'));
+    check('C9: /api/data chat shape intact; raw text carried verbatim (esc() renders it safe)',
+      data.status === 200 && Array.isArray(data.json.chat.messages) && !!xssThread &&
+      typeof data.json.chat.inbox.total_pending === 'number' &&
+      !!data.json.chat.session_active && typeof data.json.chat.session_active.by_role === 'object');
+    client.res.destroy();
+    await delay(200);
   }
 
   /* ---- C6: /healthz ---- */

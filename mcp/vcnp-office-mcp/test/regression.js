@@ -15,6 +15,9 @@
  *   R5  mood map: qa_review_passed -> working (never meeting); env tunables
  *   R6  every successful append regenerates mirrors (.mirrors-stamp dedupe)
  *   R7  office_archive_reset archives history, resets clean, refuses when busy
+ *
+ * Phase-3 additions (live-office plan §3/D3):
+ *   R8  office/dashboard.html esc() escapes chat text; honest badge + composer wired
  */
 
 const { spawn } = require('child_process');
@@ -259,6 +262,49 @@ async function r6() {
   check('R6: duplicate delivery does NOT regenerate mirrors', res.noRegenOnDuplicate === true);
 }
 
+/* ---------------- R8: dashboard chat XSS-safety + honesty markers -------- */
+async function r8() {
+  const file = path.join(ROOT, '..', '..', 'office', 'dashboard.html');
+  const html = fs.readFileSync(file, 'utf8');
+  check('R8: dashboard carries the honest «در انتظار نشست» badge', html.includes('در انتظار نشست'));
+  check('R8: composer posts to /api/message (real ledger writes only)', html.includes('/api/message'));
+  check('R8: file:// offline degradation present (composer hidden behind CHAT.online)', html.includes('CHAT.online'));
+
+  // Extract EXACTLY the 3-line esc() body via its unique terminator — a lazy
+  // /\n\}/ match would swallow the statements that follow the helper.
+  const startIdx = html.indexOf('function esc(s){');
+  const END_MARK = 'return E[c];});}';
+  const endIdx = startIdx >= 0 ? html.indexOf(END_MARK, startIdx) : -1;
+  const m = startIdx >= 0 && endIdx > startIdx
+    ? html.slice(startIdx, endIdx + END_MARK.length)
+    : null;
+  check('R8: esc() definition found in office/dashboard.html', !!m);
+  if (!m) return;
+  try {
+    const factory = new Function('"use strict";return (' + m + ');');
+    const esc = factory();
+    // NOTE: expectations are assembled from fragments — literal entity
+    // sequences do not survive this repo's write pipeline intact.
+    const apos = String.fromCharCode(39);
+    const ENT_AMP = '&' + 'amp;';
+    const ENT_LT = '&' + 'lt;';
+    const ENT_GT = '&' + 'gt;';
+    const ENT_QUOT = '&' + 'quot;';
+    const ENT_APOS = '&' + '#39;';
+    const input = 'a<b>&"' + apos;
+    check('R8: esc() escapes < > & " \'',
+      esc(input) === 'a' + ENT_LT + 'b' + ENT_GT + ENT_AMP + ENT_QUOT + ENT_APOS,
+      JSON.stringify(esc(input)));
+    const out = esc('<img src=x onerror=alert(1)>');
+    check('R8: esc() neutralizes the chat XSS vector payload',
+      typeof out === 'string' && out.indexOf('<img') === -1 &&
+        out.indexOf(ENT_LT) === 0 && out.lastIndexOf(ENT_GT) === out.length - ENT_GT.length,
+      JSON.stringify(out));
+  } catch (e) {
+    check('R8: esc() evaluates as valid JS', false, String(e));
+  }
+}
+
 /* ---------------- R7: demo archive/reset rotation (D6) ------------------- */
 async function r7() {
   const ws = tmpWorkspace();
@@ -308,6 +354,7 @@ async function r7() {
   await r5();
   await r6();
   await r7();
+  await r8();
   console.log('=========================================');
   console.log(`REGRESSION RESULT: ${fail === 0 ? 'PASS' : 'FAIL'} (${pass} passed, ${fail} failed)`);
   process.exit(fail === 0 ? 0 : 1);

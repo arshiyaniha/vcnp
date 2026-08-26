@@ -28,6 +28,7 @@ const batchDefs = require('./tools/batch').defs;
 const reportDefs = require('./tools/report').defs;
 const compactionDefs = require('./tools/compaction').defs;
 const demoResetDefs = require('./tools/demo-reset').defs;
+const inboxDefs = require('./tools/inbox').defs;
 
 // Post-append mirror refresh (live-office plan §4.1a): every successful
 // ledger append regenerates BOARD.md / office-live.json / dashboard-data.js
@@ -42,6 +43,7 @@ const TOOLS = [
   ...reportDefs,
   ...compactionDefs,
   ...demoResetDefs,
+  ...inboxDefs,
 ];
 const byName = new Map(TOOLS.map((t) => [t.name, t]));
 

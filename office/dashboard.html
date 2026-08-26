@@ -106,6 +106,35 @@ main.solo{grid-template-columns:0 minmax(0,1fr)}
 .tip b{font-weight:700}
 .sr{position:absolute;width:1px;height:1px;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 
+/* ---------- chat (Phase 3): speech bubbles + honest awaiting-session badge ---- */
+.bub{position:absolute;left:0;top:0;max-width:150px;font-size:8px;line-height:11px;
+  padding:3px 6px;background:#f7f4ff;color:#171232;white-space:normal;text-align:start;
+  will-change:transform;box-shadow:0 0 0 1px #00000088,2px 2px 0 #00000066;z-index:6}
+.bub .bx{display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden;
+  word-break:break-word}
+.bub .bdg,.bub .ba{display:block;margin-top:2px;padding:0 4px;font-size:7.5px;line-height:12px}
+.bub .bdg{color:#0c0a18;background:var(--gold);box-shadow:inset 0 0 0 1px #a87a10}
+.bub .bdg.q{background:#cfc8ee;box-shadow:inset 0 0 0 1px #6d64a8}
+.bub.ans{background:#e7faef;box-shadow:0 0 0 1px #1d9b5b,2px 2px 0 #00000066}
+.bub.ans .ba{color:#e7faef;background:#1d9b5b}
+.dossier h3 .pnd{color:var(--gold);font-weight:400}
+.clog{display:grid;gap:3px;max-height:132px;overflow-y:auto;margin-bottom:6px}
+.cl{font-size:9.5px;line-height:1.55;padding:3px 6px;background:var(--ink2);
+  box-shadow:inset 0 0 0 1px #ffffff12;word-break:break-word}
+.cl b{display:block;font-size:8px;color:var(--mut);font-weight:400;margin-bottom:1px}
+.cl.u{box-shadow:inset 0 0 0 1px #ffc02e55}
+.cl.a{box-shadow:inset 0 0 0 1px #3ddc8455;margin-top:2px}
+.pnd{display:inline-block;margin-top:2px;padding:0 5px;font-size:8px;line-height:13px;
+  color:#0c0a18;background:var(--gold)}
+.pnd.q{background:#cfc8ee}
+.cform{display:flex;gap:5px}
+.cform input{flex:1;min-width:0;background:var(--ink);color:var(--txt);border:0;
+  padding:5px 8px;font-family:inherit;font-size:10.5px;box-shadow:inset 0 0 0 2px var(--line)}
+.cform input:focus-visible{outline:2px solid var(--gold);outline-offset:1px}
+.cerr{margin-top:4px;font-size:9px;color:var(--coral)}
+.coff{font-size:9.5px;color:var(--mut);line-height:1.7}
+.coff code{font-family:var(--mn);direction:ltr;display:inline-block;color:#8d84c9}
+
 /* ---------- legend ---------- */
 .legend{display:flex;flex-wrap:wrap;gap:4px;margin-top:2px}
 .lg{font-size:10px;color:#d9d3f5;background:var(--panel);padding:2px 8px;box-shadow:inset 0 0 0 2px #3b317080}
@@ -244,7 +273,7 @@ aside h2 em{font-style:normal;font-family:var(--mn);font-size:9px;color:#6d64a8;
         </div>
       </div>
       <div class="dossier" id="dossier" hidden></div>
-      <div class="hint" id="hint">روی هر کارمند کلیک کنید تا پروندهٔ او باز شود · دوباره کلیک کنید تا برگردید</div>
+      <div class="hint" id="hint">روی هر کارمند کلیک کنید تا پرونده و گفتگوی او باز شود · دوباره کلیک کنید تا برگردید</div>
       <div class="tip" id="tip" hidden></div>
       <div class="sr" id="srLive" aria-live="polite"></div>
     </div>
@@ -428,12 +457,13 @@ var STATUSES=[
  ['done','انجام‌شده','DONE',C.green]
 ];
 var WIN_RE=/done|complete|deploy|merge|pass|approv|success|finish/i;
-var D={ok:false,roles:{},tasks:[],counts:{},events:[],progress:0,gen:''};
+var CHAT_EMPTY={messages:[],inbox:{total_pending:0,pending_by_role:{}},session_active:{by_role:{},threshold_min:30}};
+var D={ok:false,roles:{},tasks:[],counts:{},events:[],progress:0,gen:'',chat:CHAT_EMPTY};
 var everOk=false, fetchFailed=false;
 
 function readData(){
   var d=window.VCNP_DATA;
-  var out={ok:false,roles:{},tasks:[],counts:{},events:[],progress:0,gen:''};
+  var out={ok:false,roles:{},tasks:[],counts:{},events:[],progress:0,gen:'',chat:CHAT_EMPTY};
   STATUSES.forEach(function(s){out.counts[s[0]]=0;});
   try{
     if(!d||typeof d!=='object')return out;
@@ -466,6 +496,28 @@ function readData(){
     });
     evs.sort(function(a,b){return (Date.parse(b.ts)||0)-(Date.parse(a.ts)||0);});
     out.events=evs.slice(0,100);
+    /* Phase 3 chat (§1.4): server-joined threads + honest inbox/session hints.
+       Tolerant of absent/legacy payloads — chat stays an honest empty queue. */
+    var ch=d.chat;
+    if(ch&&typeof ch==='object'){
+      if(Array.isArray(ch.messages)){
+        out.chat.messages=ch.messages.filter(function(m){
+          return m&&typeof m==='object'&&typeof m.text==='string'&&typeof m.to_role==='string';
+        }).slice(-100);
+      }
+      if(ch.inbox&&typeof ch.inbox==='object'){
+        if(typeof ch.inbox.total_pending==='number'&&isFinite(ch.inbox.total_pending))
+          out.chat.inbox.total_pending=ch.inbox.total_pending;
+        if(ch.inbox.pending_by_role&&typeof ch.inbox.pending_by_role==='object')
+          out.chat.inbox.pending_by_role=ch.inbox.pending_by_role;
+      }
+      if(ch.session_active&&typeof ch.session_active==='object'&&
+         ch.session_active.by_role&&typeof ch.session_active.by_role==='object'){
+        out.chat.session_active.by_role=ch.session_active.by_role;
+        if(typeof ch.session_active.threshold_min==='number'&&isFinite(ch.session_active.threshold_min))
+          out.chat.session_active.threshold_min=ch.session_active.threshold_min;
+      }
+    }
   }catch(e){ out.ok=false; }
   return out;
 }
@@ -1316,8 +1368,36 @@ function showDossier(p){
          esc(String(e.action||'').replace(/_/g,' '))+(e.task_id?' · '+esc(e.task_id):'')+'</div>';
     });
   }
+  /* Phase 3 chat panel: real thread + honest composer (no fake answers) */
+  var th=chatThreads(p.role).slice(-5);
+  h+='<h3>گفتگو'+(pendingCount(p.role)>0?' <span class="pnd">'+pendingCount(p.role)+' بی‌پاسخ</span>':'')+'</h3>';
+  if(th.length){
+    h+='<div class="clog">';
+    th.forEach(function(m){
+      h+='<div class="cl u"><b>شما · '+esc(faTime(m.ts))+'</b>'+esc(m.text);
+      if(m.answer&&m.answer.text!=null){
+        h+='<div class="cl a"><b>'+esc(String(m.answer.actor||''))+' · '+esc(faTime(m.answer.ts))+'</b>'+esc(m.answer.text)+'</div>';
+      }else{
+        var act=sessionActive(p.role);
+        h+='<span class="pnd'+(act?' q':'')+'">'+(act?'در انتظار پاسخ':'در انتظار نشست')+'</span>';
+      }
+      h+='</div>';
+    });
+    h+='</div>';
+  }else{
+    h+='<div class="none">هنوز گفتگویی با این نقش ثبت نشده است.</div>';
+  }
+  if(CHAT.online){
+    h+='<form class="cform" id="chatForm"><input id="chatInput" type="text" maxlength="2000" autocomplete="off" '+
+       'placeholder="پیامی برای '+esc(p.fa)+' بنویسید…"><button class="btn pri" id="chatSend" type="submit">ارسال</button></form>'+
+       '<div class="cerr" id="chatErr" hidden></div>';
+  }else{
+    h+='<div class="coff">حالت آفلاین (file://) — برای گفتگو، سرور زنده را روشن کنید: <code>npm run live</code> و سپس <code>http://localhost:7788</code></div>';
+  }
   dossierEl.innerHTML=h; dossierEl.hidden=false;
   document.getElementById('dosClose').addEventListener('click',function(ev){ev.stopPropagation();clearFocus();});
+  var cf=document.getElementById('chatForm');
+  if(cf)cf.addEventListener('submit',function(ev){ev.preventDefault();sendChatMessage(p);});
   document.getElementById('hint').hidden=true;
 }
 function showZoneCard(z){
@@ -1414,6 +1494,11 @@ function buildOverlay(){
     d2.className='tag'; d2.id='tag-'+p.role;
     d2.style.color=p.acc; d2.style.boxShadow='0 -1px 0 0 '+p.acc;
     p.tagEl=d2; ovl.appendChild(d2);
+
+    /* Phase 3 chat bubble (open question or fresh answer) above the head */
+    var b=document.createElement('div');
+    b.className='bub'; b.hidden=true;
+    p.bubEl=b; ovl.appendChild(b);
   });
 }
 function positionTags(){
@@ -1423,6 +1508,12 @@ function positionTags(){
       var my = seatTop ? Math.round(p.cy+10) : Math.round(p.cy-44);
       p.msgEl.style.transform='translate('+Math.round(p.cx)+'px,'+my+'px) translateX(-50%)';
       p.msgEl.style.opacity=p.walk?'0':'1';
+    }
+    if(p.bubEl){
+      var seatTopB=(p.st==='meeting'&&p.seatIdx!=null&&p.seatIdx<3);
+      var by=seatTopB?Math.round(p.cy+24):Math.round(p.cy-66);
+      p.bubEl.style.transform='translate('+Math.round(p.cx)+'px,'+by+'px) translateX(-50%)';
+      p.bubEl.style.opacity=p.walk?'0':'1';
     }
     if(!p.tagEl)return;
     p.tagEl.textContent=p.fa;
@@ -1468,6 +1559,89 @@ function refreshDialogue(){
     p.msgTxt.style.animationDuration=dur+'s';
     p.msgTxt.style.animationTimingFunction='steps('+Math.max(20,dur*7)+')';
   });
+}
+
+/* ------------- Phase 3 chat: the honest queue (plan §3 / D3) -------------
+   Typed text becomes a REAL message_posted ledger event via POST /api/message.
+   Answers appear ONLY when a real session calls inbox_reply — until then an
+   unanswered message shows «در انتظار نشست» whenever no live session signal
+   exists in the payload (chat.session_active, derived from real ledger events).
+   NO fake typing indicators, NO canned answers, ever. */
+var CHAT={
+  online:(location.protocol==='http:'||location.protocol==='https:'),
+  sse:null,
+  answerWindowMs:15*60000 /* a fresh answer bubble lingers 15 minutes */
+};
+function chatThreads(role){
+  return (D.chat&&Array.isArray(D.chat.messages))?D.chat.messages.filter(function(m){return m.to_role===role;}):[];
+}
+function sessionActive(role){
+  var sa=D.chat&&D.chat.session_active&&D.chat.session_active.by_role;
+  return !!(sa&&sa[role]);
+}
+function pendingCount(role){
+  var pb=(D.chat&&D.chat.inbox&&D.chat.inbox.pending_by_role)||{};
+  return (typeof pb[role]==='number'&&pb[role]>0)?pb[role]:0;
+}
+function refreshChatBubbles(){
+  CREW.forEach(function(p){
+    if(!p.bubEl)return;
+    var th=chatThreads(p.role);
+    var open=th.filter(function(m){return !m.answer;});
+    var html='',isAns=false;
+    if(open.length){
+      var newest=open[open.length-1];
+      var active=sessionActive(p.role);
+      html='<span class="bx">'+esc((open.length>1?'('+open.length+') ':'')+newest.text)+'</span>'+
+           '<span class="bdg'+(active?' q':'')+'">'+(active?'در صف پاسخ':'در انتظار نشست')+'</span>';
+    }else{
+      var ans=null;
+      for(var i=th.length-1;i>=0;i--){ if(th[i].answer){ans=th[i];break;} }
+      var at=ans?Date.parse(ans.answer.ts):NaN;
+      if(ans&&isFinite(at)&&(Date.now()-at)<CHAT.answerWindowMs){
+        html='<span class="bx">'+esc(ans.answer.text)+'</span>'+
+             '<span class="ba">پاسخ '+esc(String(ans.answer.actor||''))+'</span>';
+        isAns=true;
+      }
+    }
+    if(!html){ p.bubEl.hidden=true; p.bubEl.innerHTML=''; return; }
+    p.bubEl.innerHTML=html;
+    p.bubEl.className='bub'+(isAns?' ans':'');
+    p.bubEl.hidden=false;
+  });
+}
+function srSay(t){var sr=document.getElementById('srLive');if(sr)sr.textContent=t;}
+/* Submit → POST /api/message. Server validation errors are shown verbatim;
+   nothing is optimistic: the bubble only appears once the event is really in
+   the ledger and the next payload (SSE tick or refresh) carries it. */
+function sendChatMessage(p){
+  var inp=document.getElementById('chatInput'),err=document.getElementById('chatErr'),btn=document.getElementById('chatSend');
+  if(!inp||!err)return;
+  err.hidden=true;
+  var text=String(inp.value||'').trim();
+  if(!text){ err.textContent='متن پیام خالی است.'; err.hidden=false; return; }
+  if(text.length>2000){ err.textContent='پیام بیش از ۲۰۰۰ نویسه است.'; err.hidden=false; return; }
+  if(btn)btn.disabled=true;
+  fetch('/api/message',{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({to_role:p.role,text:text})
+  }).then(function(r){
+    return r.json().catch(function(){return {};}).then(function(j){return {status:r.status,j:j};});
+  }).then(function(res){
+    if(res.status===200&&res.j&&res.j.ok){
+      inp.value='';
+      srSay('پیام شما برای '+p.fa+' در صندوق ورودی ثبت شد.');
+    }else if(res.status===429){
+      err.textContent='سرعت ارسال زیاد است — کمی صبر کنید و دوباره بفرستید.'; err.hidden=false;
+    }else if(res.j&&Array.isArray(res.j.reasons)&&res.j.reasons.length){
+      err.textContent='پیام پذیرفته نشد: '+res.j.reasons.join('؛ '); err.hidden=false;
+    }else{
+      err.textContent='ارسال ناموفق بود (کد '+res.status+').'; err.hidden=false;
+    }
+  }).catch(function(){
+    err.textContent='ارتباط با سرور برقرار نشد — پیام ارسال نشد.'; err.hidden=false;
+  }).then(function(){ if(btn)btn.disabled=false; });
 }
 
 /* ---------------- sidebar ---------------- */
@@ -1645,6 +1819,7 @@ function applyData(){
   buildTicker();
   renderSidebar();
   refreshDialogue();
+  refreshChatBubbles();
 }
 
 /* rotate the speaker in the meeting, fire queued celebrations */
@@ -1783,6 +1958,23 @@ function onKey(e){
     i = i<0 ? 0 : (i+(e.key==='ArrowRight'?1:-1)+CREW.length)%CREW.length;
     focusOn(CREW[i]);
   }
+}
+
+/* ---------------- SSE ingest (progressive enhancement, plan §4.2) --------
+   http(s):// pages subscribe to /api/stream so a message_answered appended by
+   a real session re-renders bubbles within one watcher tick (~150 ms).
+   file:// pages skip this entirely: static snapshot + 45 s script-refresh
+   loop keep working, composer hidden with an honest offline note. */
+if(CHAT.online&&window.EventSource){
+  try{
+    CHAT.sse=new EventSource('/api/stream');
+    CHAT.sse.addEventListener('payload',function(ev){
+      try{
+        var p=JSON.parse(ev.data);
+        if(p&&typeof p==='object'){ window.VCNP_DATA=p; loadAndRender(); }
+      }catch(e){ /* malformed frame — keep last good data */ }
+    });
+  }catch(e){ CHAT.sse=null; /* polling fallback stays */ }
 }
 
 /* ---------------- boot ---------------- */

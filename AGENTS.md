@@ -158,9 +158,11 @@ NEVER edit the ledger or mirrors by hand.
    `event_log { actor: "<role>", action: "work_logged", detail: { task_id: "T-NNN", action_summary: "...", artifact_refs: ["<workspace-relative path>"] } }`
 3. **Status channel** — board status changes go ONLY through `task_create` / `task_update` / `task_assign`.
 4. **Session end** — last MCP call of every session: same as (1) with `phase: "end"`.
-5. **Inbox duty (protocol)** — at session start and after milestones, check your messages
-   (`inbox_count` / `inbox_list` / `inbox_reply` — arriving in a later phase) and answer
-   pending items; first answer wins, never fabricate replies.
+5. **Inbox duty (LIVE since Phase 3)** — at session start, after every milestone, and before
+   session end, run `inbox_count { role: "<your-role>" }`; if it reports pending messages,
+   drain them with `inbox_list` and answer each via `inbox_reply { reply_to: "<event_id>",
+   text: "..." }`. First answer wins — a second reply to the same message is rejected;
+   never fabricate replies and never simulate having read messages.
 6. **Demo reset** — only `office_archive_reset` may rotate the ledger (archives to
    `office/archive/`, never deletes; refuses while another process holds the lock).
 

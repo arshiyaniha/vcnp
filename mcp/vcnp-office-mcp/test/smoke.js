@@ -105,7 +105,8 @@ async function main() {
     const names = new Set((list.result.tools || []).map((t) => t.name));
     const requiredTools = ['board_init', 'task_create', 'task_update', 'task_assign', 'board_read',
       'ledger_log', 'event_log', 'telemetry_read', 'route_model', 'llm_batch_submit',
-      'llm_batch_status', 'report_generate', 'compaction_ack', 'office_archive_reset'];
+      'llm_batch_status', 'report_generate', 'compaction_ack', 'office_archive_reset',
+      'inbox_count', 'inbox_list', 'inbox_reply'];
     const missing = requiredTools.filter((t) => !names.has(t));
     check(`tools/list exposes all ${requiredTools.length} tools`, missing.length === 0, 'missing: ' + missing.join(','));
 
@@ -258,6 +259,37 @@ async function main() {
     const br = await request('tools/call', { name: 'board_read', arguments: {} });
     check('board_read compact snapshot shows assigned task',
       !isError(br) && textOf(br).includes(taskId) && /doing:1/.test(textOf(br)), textOf(br));
+
+    // 18. inbox tools (Phase 3): seed a real-shaped message_posted via the
+    //     generic audit tool, then count/list/reply like a CEO session ------
+    const seeded = await request('tools/call', {
+      name: 'event_log',
+      arguments: { actor: 'user', action: 'message_posted',
+        detail: { message_id: 'm-0001', to_role: 'ceo', text: 'وضعیت پروژه چطور است؟', channel: 'web' } },
+    });
+    const idMatch = /\(([0-9a-f-]{16,})\)/i.exec(textOf(seeded));
+    const seededId = idMatch ? idMatch[1] : null;
+    check('message_posted seeded via event_log for inbox drill', !isError(seeded) && !!seededId, textOf(seeded));
+
+    const ic = await request('tools/call', { name: 'inbox_count', arguments: {} });
+    check('inbox_count sees 1 pending for ceo',
+      !isError(ic) && /1 pending/.test(textOf(ic)) && /ceo=1/.test(textOf(ic)), textOf(ic));
+    const il = await request('tools/call', { name: 'inbox_list', arguments: { role: 'ceo' } });
+    check('inbox_list lists pending with message_id + text',
+      !isError(il) && /\[m-0001\]/.test(textOf(il)) && textOf(il).includes('وضعیت پروژه'), textOf(il));
+    const ir = await request('tools/call', {
+      name: 'inbox_reply', arguments: { reply_to: seededId, text: 'پیشروی خوب است؛ به‌زودی گزارش می‌دهم.' },
+    });
+    check('inbox_reply answers once as ceo', !isError(ir) && /Answered m-0001 as ceo/.test(textOf(ir)), textOf(ir));
+    const ir2 = await request('tools/call', {
+      name: 'inbox_reply', arguments: { reply_to: seededId, text: 'تلاش دوم — باید رد شود' },
+    });
+    check('SECOND inbox_reply REJECTED (first-answer-wins)',
+      isError(ir2) && /already answered by ceo/.test(textOf(ir2)), textOf(ir2));
+    const ic2 = await request('tools/call', { name: 'inbox_count', arguments: {} });
+    check('inbox_count back to zero after drain', !isError(ic2) && /0 pending/.test(textOf(ic2)), textOf(ic2));
+    const iv = await request('tools/call', { name: 'inbox_reply', arguments: { reply_to: seededId, text: '' } });
+    check('inbox_reply empty text REJECTED with reason', isError(iv) && /text/.test(textOf(iv)), textOf(iv));
   } catch (err) {
     check('smoke sequence completed without exception', false, err.message);
   }

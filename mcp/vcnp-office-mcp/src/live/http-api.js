@@ -8,9 +8,12 @@
  *   GET  /api/data     full composed payload (same JSON as SSE `payload`)
  *   GET  /api/stream   text/event-stream (delegated to the SSE hub)
  *   GET  /healthz      { ok, uptime_s, ledger{events,seq,stamp}, sse_clients, port }
- *   GET  /api/inbox    501 {"ok":false,"error":"not_implemented_yet"}  (Phase 3)
- *   POST /api/message  501 stub — rate-limited, size-capped, JSON-validated (Phase 3)
- *   POST /api/phone    501 stub — same guards (Phase 5)
+ *   POST /api/message  {to_role,text} → validated message_posted append →
+ *                      {ok,event_id,message_id} (Phase 3); mirrors + SSE
+ *                      broadcast happen automatically downstream (D2)
+ *   GET  /api/inbox    ?role=&include_answered=1 → {pending,answered_recent}
+ *                      via the SAME projection code as MCP inbox_list (§3.1)
+ *   POST /api/phone    501 stub — rate-limited, size-capped, JSON-validated (Phase 5)
  *   OPTIONS *          204 + CORS preflight (file:// pages have an opaque origin)
  *   GET/HEAD static    office/ subtree first, then templates/ (read-only),
  *                      realpath-contained; traversal attempts → 403
@@ -24,7 +27,10 @@
  * stubs validate the contract but never fake an answer.
  *
  * This module deliberately does NOT import src/store — all workspace data
- * flows in via deps (composeBuild / ledgerStats), keeping it unit-testable.
+ * flows in via deps (composeBuild / ledgerStats / postMessage / inboxProject),
+ * keeping it unit-testable. When a writer dep is missing its route answers
+ * 501 {"ok":false,"error":"not_implemented_yet"} — the contract stays visible
+ * and nothing fake ever responds.
  */
 
 const fs = require('fs');
@@ -73,6 +79,8 @@ function createHttpApi(deps) {
   const port = Number.isFinite(d.port) ? d.port : null;
   const composeBuild = typeof d.composeBuild === 'function' ? d.composeBuild : (o) => compose.build(o);
   const ledgerStats = typeof d.ledgerStats === 'function' ? d.ledgerStats : () => ({ events: 0, seq: 0, stamp: null });
+  const postMessage = typeof d.postMessage === 'function' ? d.postMessage : null;
+  const inboxProject = typeof d.inboxProject === 'function' ? d.inboxProject : null;
   const staticRoots = Array.isArray(d.staticRoots) ? d.staticRoots.map((r) => path.resolve(r)) : [];
   const bodyLimit = intOpt(d.bodyLimitBytes, DEFAULT_BODY_LIMIT_BYTES);
   const rateMax = intOpt(d.rateLimitMax, RATE_MAX_DEFAULT);
@@ -250,14 +258,30 @@ function createHttpApi(deps) {
       return;
     }
 
-    /* Future-phase endpoints: contract visible, nothing fake answers. */
+    /* ---- Phase 3 chat loop (plan §1.3) — writer injected via deps; without
+       one the routes keep answering 501 honestly (nothing fake responds). --- */
+
     if (p === '/api/inbox') {
       if (req.method !== 'GET') throw new HttpError(405, 'method_not_allowed');
-      notImplemented(res);
+      if (!inboxProject) {
+        notImplemented(res);
+        return;
+      }
+      const role = u.searchParams.get('role') || undefined;
+      const includeAnswered =
+        ['1', 'true'].includes((u.searchParams.get('include_answered') || '').toLowerCase());
+      const proj = inboxProject({ role, include_answered: includeAnswered });
+      sendJson(res, 200, {
+        ok: true,
+        pending: proj.pending,
+        answered_recent: includeAnswered ? proj.answered_recent : [],
+        total_pending: proj.total_pending,
+        pending_by_role: proj.pending_by_role,
+      });
       return;
     }
 
-    if (p === '/api/message' || p === '/api/phone') {
+    if (p === '/api/message') {
       if (req.method !== 'POST') throw new HttpError(405, 'method_not_allowed');
       if (rateLimited(req)) {
         sendJson(res, 429, { ok: false, error: 'rate_limited' });
@@ -268,7 +292,37 @@ function createHttpApi(deps) {
         sendJson(res, 413, { ok: false, error: 'payload_too_large' });
         return;
       }
-      parseJsonBody(body); // contract validation now; Phase 3/5 consume the value
+      const parsed = parseJsonBody(body);
+      if (!postMessage) {
+        notImplemented(res);
+        return;
+      }
+      const r = await postMessage({ to_role: parsed.to_role, text: parsed.text, channel: 'web' });
+      if (r && r.ok) {
+        sendJson(res, 200, { ok: true, event_id: r.event_id, message_id: r.message_id });
+        return;
+      }
+      sendJson(res, 400, {
+        ok: false,
+        error: 'invalid_message',
+        reasons: (r && r.reasons) || [(r && r.error) || 'rejected'],
+      });
+      return;
+    }
+
+    /* Phase 5 telephone exchange — contract visible, nothing fake answers. */
+    if (p === '/api/phone') {
+      if (req.method !== 'POST') throw new HttpError(405, 'method_not_allowed');
+      if (rateLimited(req)) {
+        sendJson(res, 429, { ok: false, error: 'rate_limited' });
+        return;
+      }
+      const body = await readBody(req, bodyLimit);
+      if (body.tooLarge) {
+        sendJson(res, 413, { ok: false, error: 'payload_too_large' });
+        return;
+      }
+      parseJsonBody(body);
       notImplemented(res);
       return;
     }

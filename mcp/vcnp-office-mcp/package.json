@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node src/server.js",
     "live": "node src/live-server.js",
-    "test": "node test/smoke.js && node test/regression.js && node test/live-server.js"
+    "test": "node test/smoke.js && node test/regression.js && node test/live-server.js && node test/inbox.test.js && node test/events-validate.test.js"
   },
   "engines": {
     "node": ">=20"
