@@ -22,3 +22,4 @@ The SINGLE dispatcher of all work. Assigns one task brief at a time to executor 
 - Escalation ladder on QA rejections: ×2 → REASSIGN the task to a higher-tier MODE; ×3 → mandatory premium-mode review; log each bump as a lesson in the Memory Bank.
 - Gate SLA: Security session unresponsive (2 pings / 30 min) → escalate to the CEO.
 - Reports milestones upward to the CEO as simple status.
+- **Formal handoff from the CEO** (a new mission or milestone lands on you): call `meeting_start({reason:"explicit", participants:["ceo","orchestrator"], topic:"<mission/milestone name>"})`, then `meeting_end({outcome_summary})` once the handoff is settled — same real event the CEO's charter describes; either side may be the one who calls it, never both for the same handoff.

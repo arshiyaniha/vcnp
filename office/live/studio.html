@@ -89,6 +89,57 @@ button.pill:hover{background:#fff}
   width:24px;height:24px;cursor:pointer;color:var(--ink2);font-size:13px;line-height:1}
 .hint{position:fixed;bottom:16px;inset-inline-start:16px;font-size:11px;color:var(--mut);z-index:3}
 @media(prefers-reduced-motion:reduce){*{transition:none!important}}
+
+/* ---------- chat composer (mounted into .card by studio-comms.js) ---------- */
+.card h3 .pnd{color:var(--amber);font-weight:400;background:none;padding:0}
+.clog{display:grid;gap:4px;max-height:132px;overflow-y:auto;margin-bottom:6px}
+.cl{font-size:10px;line-height:1.55;padding:5px 8px;background:#ffffffb0;border:1px solid var(--line);
+  border-radius:8px;word-break:break-word}
+.cl b{display:block;font-size:9px;color:var(--mut);font-weight:400;margin-bottom:1px}
+.cl.u{box-shadow:inset 0 0 0 1px #f5a52455}
+.cl.a{box-shadow:inset 0 0 0 1px #10b98155;margin-top:3px}
+.pnd{display:inline-block;margin-top:3px;padding:1px 6px;font-size:9px;border-radius:999px;
+  color:#151b2b;background:var(--amber)}
+.pnd.q{background:#dbe2ee;color:var(--ink2)}
+.cform{display:flex;gap:5px}
+.cform input{flex:1;min-width:0;background:#ffffffb0;color:var(--ink);border:1px solid var(--line);
+  border-radius:8px;padding:6px 9px;font-family:inherit;font-size:10.5px}
+.cform input:focus-visible{outline:2px solid var(--amber);outline-offset:1px}
+.cform button{border:0;border-radius:8px;padding:6px 12px;font-family:inherit;font-size:10.5px;cursor:pointer;
+  background:var(--amber);color:#151b2b;font-weight:700}
+.cerr{margin-top:4px;font-size:9px;color:var(--rose)}
+.coff{font-size:10px;color:var(--mut);line-height:1.7}
+.coff code{font-family:var(--mn);direction:ltr;display:inline-block;color:var(--ink2)}
+
+/* ---------- تلفنخانه widget (mounted into #phoneBox in the rail) ---------- */
+.phonebox{display:grid;gap:6px}
+.phrow{display:flex;gap:5px;flex-wrap:wrap;align-items:center}
+.phbtn{display:inline-flex;align-items:center;gap:6px;background:#ffffffb0;color:var(--ink);
+  border:1px solid var(--line);border-radius:8px;padding:6px 11px;font-family:inherit;font-size:10.5px;cursor:pointer}
+.phbtn:hover{border-color:var(--amber)}
+.phbtn.pri{color:#151b2b;background:var(--amber);font-weight:700;border-color:transparent}
+.phbtn.danger{color:#fff;background:var(--rose);font-weight:700;border-color:transparent}
+.phbtn:disabled{opacity:.45;cursor:not-allowed}
+.phtime{font-family:var(--mn);font-size:11px;color:var(--rose);direction:ltr}
+.phlive{font-size:10px;color:var(--mut);line-height:1.7;min-height:14px}
+.phlive b{color:var(--ink2);font-weight:600}
+.phlive i{color:var(--mut);font-style:normal}
+.phnt{display:inline-block;padding:1px 6px;font-size:9px;border-radius:999px;color:#fff;background:var(--mut)}
+.phcall{border-top:1px solid var(--line);padding-top:6px;display:grid;gap:4px}
+.phcall audio{width:100%;height:28px}
+.phmeta{font-size:9.5px;color:var(--mut);display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.phtx{font-size:10px;line-height:1.6;color:var(--ink)}
+.pherr{font-size:9px;color:var(--rose)}
+
+/* ---------- toast notifications (new call / message / hand-off) ---------- */
+#toasts{position:fixed;top:64px;left:50%;transform:translateX(-50%);z-index:6;display:grid;gap:8px;
+  pointer-events:none;width:min(90vw,420px)}
+.toast{background:var(--card);backdrop-filter:blur(14px);border:1px solid var(--line);border-radius:12px;
+  padding:9px 14px;font-size:11.5px;color:var(--ink);box-shadow:0 12px 30px #15204022;
+  animation:toastIn .25s ease-out}
+.toast.out{animation:toastOut .4s ease-in forwards}
+@keyframes toastIn{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:translateY(0)}}
+@keyframes toastOut{to{opacity:0;transform:translateY(-8px)}}
 </style>
 </head>
 <body>
@@ -115,25 +166,34 @@ button.pill:hover{background:#fff}
   <div class="crew" id="crew"></div>
   <h2>آخرین رویدادها</h2>
   <ul class="ev" id="ev"></ul>
+  <h2>تلفنخانه</h2>
+  <div class="phonebox" id="phoneBox" aria-label="تلفنخانه — ضبط پیام صوتی برای مدیر و پخش تماس‌های اخیر"></div>
 </aside>
 
 <div class="card" id="card" hidden></div>
-<div class="hint">روی هر کارمند کلیک کنید</div>
+<div id="toasts" aria-live="polite"></div>
+<div class="hint">روی هر کارمند کلیک کنید تا پروندهٔ او و گفتگو باز شود</div>
 
 <script src="../dashboard-data.js"></script>
 <script src="assets/vcnp-normalize.js"></script>
 <script src="assets/vcnp-store-client.js"></script>
+<script src="assets/studio-data.js"></script>
+<script src="assets/studio-furniture.js"></script>
 <script src="assets/studio-renderer.js"></script>
+<script src="assets/studio-comms.js"></script>
 <script>
 (function(){
   'use strict';
   VCNPStudio.init();
+  VCNPComms.init();
   /* Live upgrade (plan §5.3): SSE with polling fallback; on total failure the
      store client keeps delivering the static window.VCNP_DATA snapshot with
      meta.live=false, so the offline badge is honest and nothing is faked. */
   VCNP_STORE.connect({
     onPayload: function(payload, meta){
-      VCNPStudio.apply(VCNP.normalize(payload), meta);
+      var normalized = VCNP.normalize(payload);
+      VCNPStudio.apply(normalized, meta);
+      VCNPComms.apply(normalized);
     }
   });
 })();

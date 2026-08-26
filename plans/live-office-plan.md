@@ -419,6 +419,16 @@ events through `store.appendEvent` ⇒ identical downstream behavior for web and
 `meeting_ended` (crash-safe: renderers also expire a meeting visually after 10 min with an
 «interrupted» tag — honest about missing end events).
 
+**Charter coverage note:** the `qa_gate`/`critical_task`/`standup` rows above describe an intended
+charter obligation that was NOT actually written into any charter file until an audit during the
+studio follow-up work found the gap. Only the CEO↔Orchestrator formal-handoff case is wired today
+([`core/charters/vcnp-ceo.md`](../core/charters/vcnp-ceo.md#handoff-rules),
+[`core/charters/vcnp-orchestrator.md`](../core/charters/vcnp-orchestrator.md#handoff-rules), both
+using `reason:"explicit"`). The `qa_gate`/`critical_task`/`standup` charter wiring remains a known
+gap — none of `vcnp-qa.md`, `vcnp-orchestrator.md`, or `vcnp-planner.md` call `meeting_start` for
+those reasons yet; a real session will only produce those gatherings if it independently reads and
+follows this table.
+
 **Wall screen** (both styles): overall progress bar; the 3 newest artifacts of the most recently
 updated `doing` task; last meeting topic + verdict; pending-inbox counter («۲ پیام در انتظار»).
 

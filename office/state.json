@@ -3,7 +3,7 @@
   "project": {
     "name": "VCNP Demo Site",
     "goal": "Prove the golden path",
-    "overall_progress": 75
+    "overall_progress": 67
   },
   "tasks": [
     {
@@ -265,7 +265,28 @@
       "created_ts": "2026-08-26T09:04:37.756Z",
       "updated_ts": "2026-08-26T09:04:37.756Z",
       "reports": []
+    },
+    {
+      "task_id": "T-009",
+      "title": "تست واگذاری برای پالس",
+      "assignee_role": "executor",
+      "task_class": "C1",
+      "budget_tokens": 1000,
+      "acceptance_criteria": [
+        "x"
+      ],
+      "context_refs": [],
+      "priority": "medium",
+      "definition_of_done": "x",
+      "status": "todo",
+      "progress_percent": 0,
+      "artifacts": [],
+      "blockers": [],
+      "notes_for_qa": "",
+      "created_ts": "2026-08-26T18:49:44.150Z",
+      "updated_ts": "2026-08-26T18:49:44.150Z",
+      "reports": []
     }
   ],
-  "events_count": 40
+  "events_count": 58
 }

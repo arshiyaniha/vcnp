@@ -6,6 +6,7 @@
 
 - **T-007** a · vcnp-executor · C1 · 0% · artifacts: 0
 - **T-008** b · vcnp-executor · C1 · 0% · artifacts: 0
+- **T-009** تست واگذاری برای پالس · executor · C1 · 0% · artifacts: 0
 
 ## Doing
 

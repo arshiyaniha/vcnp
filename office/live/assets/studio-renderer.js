@@ -14,39 +14,16 @@
 
   var RM = global.matchMedia && global.matchMedia('(prefers-reduced-motion: reduce)').matches;
   var cv, ctx, DPR = 1, VW = 0, VH = 0;
-  /* roles: visual placement only — mood/energy/active facts come from apply() */
-  var ROLES = [
-    { r: 'ceo', fa: 'مدیرعامل', en: 'CEO', ini: 'مد', c: '#f5a524', gx: 11.5, gy: 1, hair: '#2c2438', skin: '#f4c9a3' },
-    { r: 'planner', fa: 'برنامه‌ریز', en: 'PLANNER', ini: 'بر', c: '#8b5cf6', gx: 5.5, gy: 1, hair: '#f0e6ff', skin: '#e6ad82' },
-    { r: 'orchestrator', fa: 'هماهنگ‌کننده', en: 'ORCH', ini: 'هم', c: '#3b82f6', gx: 8.5, gy: 1, hair: '#16233f', skin: '#c68a5e' },
-    { r: 'executor', fa: 'مجری', en: 'EXECUTOR', ini: 'مج', c: '#10b981', gx: 5.5, gy: 8, hair: '#5b3218', skin: '#f4c9a3' },
-    { r: 'qa', fa: 'کنترل کیفیت', en: 'QA', ini: 'کی', c: '#14b8a6', gx: 1, gy: 4, hair: '#3b1f2c', skin: '#8d5a34' },
-    { r: 'security', fa: 'امنیت', en: 'SECURITY', ini: 'ام', c: '#f43f5e', gx: 1, gy: 6, hair: '#14121d', skin: '#e6ad82' },
-    { r: 'rc', fa: 'کنترل منابع', en: 'RESOURCES', ini: 'من', c: '#ec4899', gx: 1.5, gy: 1, hair: '#7c3016', skin: '#f4c9a3' },
-    { r: 'librarian', fa: 'کتابدار', en: 'LIBRARIAN', ini: 'کت', c: '#f97316', gx: 11.5, gy: 5, hair: '#d9d4e6', skin: '#c68a5e' },
-    { r: 'devops', fa: 'دواپس', en: 'DEVOPS', ini: 'دو', c: '#6366f1', gx: 0.5, gy: 8.5, hair: '#241c30', skin: '#8d5a34' },
-  ];
-  var BY = {}; ROLES.forEach(function (p) { BY[p.r] = p; p.hx = p.gx; p.hy = p.gy; p.cx = p.gx; p.cy = p.gy; });
-
-  var ZONES = [
-    { id: 'side', fa: 'میزهای کناری', x: 0, y: 0, w: 3, h: 2.6, c: '#ec4899' },
-    { id: 'plan', fa: 'ردیف برنامه‌ریزی', x: 3.4, y: 0, w: 6.6, h: 2.6, c: '#8b5cf6' },
-    { id: 'ceo', fa: 'دفتر مدیرعامل', x: 10.4, y: 0, w: 3.2, h: 2.6, c: '#f5a524' },
-    { id: 'gate', fa: 'گیت کیفیت و امنیت', x: 0, y: 3, w: 3, h: 4, c: '#f43f5e' },
-    { id: 'meet', fa: 'اتاق جلسه', x: 3.4, y: 3, w: 6.6, h: 4, c: '#3b82f6' },
-    { id: 'lib', fa: 'کتابخانه', x: 10.4, y: 3, w: 3.2, h: 4, c: '#f97316' },
-    { id: 'ops', fa: 'دواپس', x: 0, y: 7.4, w: 1.6, h: 2.6, c: '#6366f1' },
-    { id: 'rack', fa: 'رک سرور', x: 1.9, y: 7.4, w: 1.1, h: 2.6, c: '#14b8a6' },
-    { id: 'exec', fa: 'پادهای مجری', x: 3.4, y: 7.4, w: 6.6, h: 2.6, c: '#10b981' },
-    { id: 'rec', fa: 'پذیرش', x: 10.4, y: 7.4, w: 3.2, h: 2.6, c: '#0ea5e9' },
-  ];
-  var SEATS = [[5.2, 4.1], [6.7, 4.1], [8.2, 4.1], [5.2, 5.9], [6.7, 5.9], [8.2, 5.9]];
+  /* Static layout data lives in studio-data.js (loaded first) purely to stay
+     under the 500-line cap here — roles: visual placement only, mood/energy
+     facts come from apply(). */
+  var SD = global.STUDIO_DATA || { ROLES: [], BY: {}, ZONES: [], SEATS: [], ST: [] };
+  var ROLES = SD.ROLES, BY = SD.BY, ZONES = SD.ZONES, SEATS = SD.SEATS, ST = SD.ST;
 
   /* ---------- data (fed by apply(), never read from a global) ---------- */
-  var ST = [['todo', 'انجام‌نشده', '#94a3b8'], ['doing', 'در حال انجام', '#3b82f6'],
-    ['awaiting_orchestrator', 'منتظر هماهنگ‌کننده', '#8b5cf6'], ['review', 'بازبینی', '#14b8a6'],
-    ['blocked', 'مسدود', '#f43f5e'], ['done', 'انجام‌شده', '#10b981']];
-  var D = { ok: false, counts: {}, tasks: [], events: [], progress: 0, roles: {}, live: false };
+  var D = { ok: false, counts: {}, tasks: [], events: [], progress: 0, roles: {}, live: false, meetings: null, chat: null, phone: null };
+  var HAS_APPLIED = false;
+  var SEEN_EVENT_KEYS = new Set();
 
   function ec(e) { return e < 35 ? '#f43f5e' : e < 65 ? '#f5a524' : '#10b981'; }
 
@@ -112,74 +89,10 @@
   }
 
   /* ---------- furniture ---------- */
-  function deskSet(gx, gy, c) {
-    blob(gx + 0.5, gy + 0.35, 42, 20, 0.16);
-    box(gx, gy, 1.15, 0.62, 17, '#e7ddcd');
-    var m = iso(gx + 0.9, gy + 0.2, 17);
-    ctx.save(); ctx.translate(m[0], m[1]);
-    ctx.fillStyle = '#2b3347'; rr(-13, -26, 26, 18, 3); ctx.fill();
-    ctx.fillStyle = mixc('#0f1729', c, 0.35); rr(-11, -24, 22, 14, 2); ctx.fill();
-    ctx.fillStyle = 'rgba(255,255,255,.16)'; rr(-9, -22, 12, 2, 1); ctx.fill(); rr(-9, -18, 16, 2, 1); ctx.fill();
-    ctx.fillStyle = '#2b3347'; rr(-2, -8, 4, 5, 1); ctx.fill(); rr(-8, -4, 16, 3, 1.5); ctx.fill();
-    ctx.restore();
-    var k = iso(gx + 0.35, gy + 0.42, 17);
-    ctx.fillStyle = '#cbd3e2'; ctx.save(); ctx.translate(k[0], k[1]); ctx.transform(1, .5, -1, .5, 0, 0);
-    rr(-11, -5, 22, 10, 2); ctx.fill(); ctx.restore();
-  }
-  function chair(gx, gy, c) { blob(gx, gy, 20, 10, .14); box(gx - 0.22, gy - 0.22, 0.44, 0.44, 9, c || '#aeb8cd'); }
-  function plant(gx, gy, s) {
-    s = s || 1; blob(gx, gy, 20 * s, 10 * s, .15);
-    box(gx - 0.16, gy - 0.16, 0.32, 0.32, 9 * s, '#c58a5a');
-    var p = iso(gx, gy, 9 * s); ctx.save(); ctx.translate(p[0], p[1]);
-    ctx.fillStyle = '#2f9e6b'; ctx.beginPath(); ctx.ellipse(0, -9 * s, 11 * s, 13 * s, 0, 0, 7); ctx.fill();
-    ctx.fillStyle = '#3fbf83'; ctx.beginPath(); ctx.ellipse(-5 * s, -14 * s, 7 * s, 8 * s, -.4, 0, 7); ctx.fill();
-    ctx.fillStyle = '#57d69a'; ctx.beginPath(); ctx.ellipse(6 * s, -12 * s, 6 * s, 7 * s, .5, 0, 7); ctx.fill();
-    ctx.restore();
-  }
-  function rack(gx, gy, t) {
-    blob(gx + 0.35, gy + 0.6, 30, 15, .18);
-    box(gx, gy, 0.7, 0.7, 54, '#39415c');
-    var p = iso(gx + 0.35, gy + 0.35, 54); ctx.save(); ctx.translate(p[0], p[1]);
-    for (var i = 0; i < 6; i++) {
-      var on = Math.sin(t / 260 + i * 1.7) > 0;
-      ctx.fillStyle = 'rgba(255,255,255,.10)'; rr(-13, -46 + i * 7, 26, 5, 2); ctx.fill();
-      ctx.fillStyle = on ? '#3fbf83' : 'rgba(255,255,255,.22)'; ctx.beginPath(); ctx.arc(-9, -43.5 + i * 7, 1.6, 0, 7); ctx.fill();
-      ctx.fillStyle = i % 3 ? 'rgba(255,255,255,.25)' : '#f5a524'; ctx.beginPath(); ctx.arc(-4, -43.5 + i * 7, 1.4, 0, 7); ctx.fill();
-    }
-    ctx.restore();
-  }
-  function shelf(gx, gy) {
-    blob(gx + 0.4, gy + 0.5, 30, 15, .16);
-    box(gx, gy, 0.8, 0.5, 46, '#b98a5e');
-    var p = iso(gx + 0.4, gy + 0.25, 46), cols = ['#f43f5e', '#3b82f6', '#10b981', '#f5a524', '#8b5cf6', '#14b8a6'];
-    ctx.save(); ctx.translate(p[0], p[1]);
-    for (var s = 0; s < 3; s++) for (var b = 0; b < 7; b++) {
-      ctx.fillStyle = cols[(s * 3 + b) % 6]; rr(-13 + b * 4, -40 + s * 13, 3, 10, 1); ctx.fill();
-    }
-    ctx.restore();
-  }
-  function table(gx, gy, w, d) {
-    blob(gx + w / 2, gy + d / 2, 90, 44, .18);
-    box(gx, gy, w, d, 15, '#e2d6c4');
-    var p = iso(gx + w / 2, gy + d / 2, 15); ctx.save(); ctx.translate(p[0], p[1]);
-    ctx.fillStyle = 'rgba(21,27,43,.06)'; ctx.beginPath(); ctx.ellipse(0, 0, 58, 28, 0, 0, 7); ctx.fill();
-    ctx.fillStyle = '#3b82f6'; rr(-30, -8, 20, 12, 2); ctx.fill();
-    ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(6, -2, 4, 0, 7); ctx.fill();
-    ctx.fillStyle = '#f5a524'; ctx.beginPath(); ctx.arc(22, 4, 4, 0, 7); ctx.fill();
-    ctx.restore();
-  }
-  function boardFixture(gx, gy, t) {
-    blob(gx + 0.4, gy + 0.3, 26, 13, .14);
-    box(gx, gy, 0.12, 0.9, 60, '#cfd7e6');
-    var p = iso(gx + 0.06, gy + 0.45, 60); ctx.save(); ctx.translate(p[0], p[1]);
-    ctx.fillStyle = '#12192b'; rr(-4, -46, 8, 44, 3); ctx.fill();
-    var txtc = ['#3fbf83', '#7cc4ff', '#ffd27a'];
-    for (var i = 0; i < 5; i++) {
-      var w = 3 + ((Math.floor(t / 700) + i) % 3);
-      ctx.fillStyle = txtc[i % 3]; ctx.globalAlpha = .85; rr(-2.5, -42 + i * 8, w, 3, 1.5); ctx.fill();
-    }
-    ctx.globalAlpha = 1; ctx.restore();
-  }
+  /* deskSet/chair/plant/rack/shelf/table/boardFixture now live in
+     studio-furniture.js (frees line budget here) — assigned once init()
+     creates ctx; see init(). */
+  var deskSet, chair, plant, rack, shelf, table, boardFixture;
 
   /* ---------- character ---------- */
   function person(p, t) {
@@ -194,6 +107,15 @@
     if (p.active) {
       ctx.strokeStyle = 'rgba(16,185,129,.30)'; ctx.lineWidth = 9;
       ctx.beginPath(); ctx.arc(0, 6, 27, 0, 7); ctx.stroke();
+    }
+    if (p.pulseUntil && global.performance.now() < p.pulseUntil) {
+      /* hand-off pulse (§ studio-comms integration) — a real task_assigned/
+         task_created event just happened for this role; NOT a fake meeting,
+         just a transient "something happened here" glow. */
+      ctx.globalAlpha = 0.35 + 0.25 * Math.sin(t / 120);
+      ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 6;
+      ctx.beginPath(); ctx.arc(0, 6, 34, 0, 7); ctx.stroke();
+      ctx.globalAlpha = 1;
     }
     ctx.restore();
     var breathe = Math.sin(ph * 1.6) * 1.1;
@@ -257,6 +179,16 @@
         ctx.beginPath(); ctx.arc(-11 + d2 * 11, top - 11.5, 2.6, 0, 7); ctx.fill();
       }
     }
+    ctx.restore();
+  }
+
+  /* Name pill, drawn in its OWN pass after every body (scene(), 2nd loop) so
+     a neighboring seated character (SEATS are only ~1.5 iso-units apart)
+     never paints over another's label — the original single-pass order made
+     labels clip/overlap at the meeting table. */
+  function personLabel(p) {
+    var g = iso(p.cx, p.cy, 0);
+    ctx.save(); ctx.translate(g[0], g[1]);
     ctx.font = '600 11px var(--fa),Tahoma,sans-serif'; ctx.textAlign = 'center'; ctx.direction = 'rtl';
     var w = ctx.measureText(p.fa).width + 16;
     ctx.fillStyle = 'rgba(255,255,255,.92)'; ctx.strokeStyle = 'rgba(21,27,43,.10)'; ctx.lineWidth = 1;
@@ -332,27 +264,43 @@
       box(11.6, 9.2, 1.4, 0.7, 14, '#8fb6d8'); plant(13.2, 8.2, 1.05);
     })();
 
-    ROLES.slice().sort(function (a, b) { return (a.cx + a.cy) - (b.cx + b.cy); }).forEach(function (p) { person(p, t); });
+    var painted = ROLES.slice().sort(function (a, b) { return (a.cx + a.cy) - (b.cx + b.cy); });
+    painted.forEach(function (p) { person(p, t); });
+    painted.forEach(function (p) { personLabel(p); });
     ctx.restore();
   }
 
   /* ---------- state ---------- */
   var SEL = null, MEET = [];
   function applyRoles() {
+    /* Meeting honesty guard (mirrors office/dashboard.html's proven rule):
+       gathering is driven ONLY by a real ACTIVE meeting from the composed
+       payload (latest meeting_started without meeting_ended). A start open
+       >10 min expires visually; a stale mood:'meeting' with no live meeting
+       object honestly degrades to working — nobody fake-gathers. */
+    var am = D.meetings && D.meetings.active;
+    var mAge = am ? (Date.now() - Date.parse(am.started_ts)) : Infinity;
+    var meetLive = !!(am && isFinite(mAge) && mAge >= 0 && mAge < 600000);
+    var inMeet = {};
+    if (meetLive) am.participants.forEach(function (r) { inMeet[r] = true; });
     MEET = [];
     ROLES.forEach(function (p, i) {
       var r = D.roles[p.r] || {};
-      p.st = r.mood || 'sleeping'; p.energy = typeof r.energy === 'number' ? r.energy : 0;
+      var mood = r.mood || 'sleeping';
+      if (mood === 'meeting' && !inMeet[p.r]) mood = 'working';
+      p.st = mood; p.energy = typeof r.energy === 'number' ? r.energy : 0;
       p.active = !!r.active; p.last = r.last_event_time || null;
       p.ph = i * 0.7; p.speaking = false;
-      if (p.st === 'meeting') MEET.push(p);
+      if (inMeet[p.r]) MEET.push(p);
     });
+    if (meetLive) MEET.sort(function (a, b) { return am.participants.indexOf(a.r) - am.participants.indexOf(b.r); });
     ROLES.forEach(function (p) {
       var want = [p.hx, p.hy];
-      if (p.st === 'meeting') { var i = MEET.indexOf(p); if (i < SEATS.length) want = [SEATS[i][0], SEATS[i][1]]; }
+      if (inMeet[p.r]) { var i = MEET.indexOf(p); if (i < SEATS.length) want = [SEATS[i][0], SEATS[i][1]]; }
       p.tx = want[0]; p.ty = want[1];
     });
     rail();
+    if (SEL && BY[SEL]) open(BY[SEL]); /* keep an open dossier's chat/task list live, not frozen at click-time */
   }
   function tickState(t) {
     ROLES.forEach(function (p) { p.cx += (p.tx - p.cx) * 0.06; p.cy += (p.ty - p.cy) * 0.06; });
@@ -389,9 +337,11 @@
       cw.innerHTML = '';
       ROLES.forEach(function (p) {
         var r = D.roles[p.r] || {};
+        var pend = (D.chat && D.chat.pending_by_role && D.chat.pending_by_role[p.r]) || 0;
         var d = document.createElement('div'); d.className = 'cr' + (SEL === p.r ? ' sel' : '');
         d.innerHTML = '<span class="av" style="background:' + p.c + '">' + esc(p.ini) + '</span>' +
           '<span class="nm">' + esc(p.fa) + '</span><span class="md">' + esc(r.mood_fa || global.VCNP.MOOD_FA.working) + '</span>' +
+          (pend ? '<span class="pend" title="' + pend + ' پیام در انتظار">' + pend + '</span>' : '') +
           '<span class="en"><i style="width:' + p.energy + '%;background:' + ec(p.energy) + '"></i></span>';
         d.onclick = function () { SEL === p.r ? close() : open(p); };
         cw.appendChild(d);
@@ -417,6 +367,12 @@
   }
   var cardEl;
   function open(p) {
+    /* applyRoles() re-calls open() on every live tick to keep an open dossier
+       fresh (new chat replies, new tasks) — preserve any in-progress typed
+       draft across that rebuild so a live update never wipes what the user
+       is mid-typing. */
+    var draftInput = document.getElementById('chatInput');
+    var draft = (SEL === p.r && draftInput) ? draftInput.value : '';
     SEL = p.r;
     var ts = D.tasks.filter(function (t) { return t && t.assignee_role === p.r; });
     var r = D.roles[p.r] || {};
@@ -432,18 +388,52 @@
         esc(m[1]) + '<code>' + esc(t.task_id) + '</code></div></div>';
     });
     cardEl.innerHTML = h; cardEl.hidden = false;
+    if (global.VCNPComms) global.VCNPComms.mountDossier(cardEl, p.r);
+    if (draft) { var inp2 = document.getElementById('chatInput'); if (inp2) inp2.value = draft; }
     document.getElementById('cc').onclick = close;
     rail();
   }
   function close() { SEL = null; if (cardEl) cardEl.hidden = true; rail(); }
 
+  /* Hand-off pulse — a transient glow, NOT a fake meeting: driven directly by
+     real task_assigned/task_created ledger events (via recent_events, cross-
+     referenced against tasks[].assignee_role since the composed recent_events
+     projection drops the assignee field). Cold-start (the very first apply(),
+     e.g. from the static snapshot) only seeds SEEN_EVENT_KEYS — it never fires,
+     so reloading the page doesn't replay old hand-offs. */
+  function pulse(roles, ms) {
+    var until = global.performance.now() + (ms || 2600);
+    (roles || []).forEach(function (r) { if (BY[r]) BY[r].pulseUntil = until; });
+  }
+  function detectHandoffs(n) {
+    var tasksById = {};
+    n.tasks.forEach(function (tk) { if (tk && tk.task_id) tasksById[tk.task_id] = tk; });
+    var pulseRoles = [];
+    (n.meta.recent_events || []).forEach(function (e) {
+      if (!e || (e.action !== 'task_assigned' && e.action !== 'task_created')) return;
+      var key = [e.ts, e.actor, e.action, e.task_id].join('|');
+      if (SEEN_EVENT_KEYS.has(key)) return;
+      SEEN_EVENT_KEYS.add(key);
+      if (!HAS_APPLIED) return;
+      var tk = tasksById[e.task_id];
+      if (e.actor) pulseRoles.push(e.actor);
+      if (tk && tk.assignee_role) pulseRoles.push(tk.assignee_role);
+      if (global.VCNPComms && tk) {
+        var fromFa = (BY[e.actor] || {}).fa || e.actor, toFa = (BY[tk.assignee_role] || {}).fa || tk.assignee_role;
+        global.VCNPComms.toast('🤝 ' + fromFa + ' تسک «' + (tk.title || e.task_id) + '» را به ' + toFa + ' سپرد');
+      }
+    });
+    if (pulseRoles.length) pulse(pulseRoles, 2600);
+  }
+
   /* ---------- public: apply a normalized snapshot ---------- */
   function apply(normalized, meta) {
-    var n = normalized || (global.VCNP ? global.VCNP.normalize(null) : { ok: false, roles: {}, tasks: [], project: {}, meta: {} });
+    var n = normalized || (global.VCNP ? global.VCNP.normalize(null) : { ok: false, roles: {}, tasks: [], project: {}, meta: {}, meetings: {}, chat: {}, phone: {} });
     var counts = {}; ST.forEach(function (s) { counts[s[0]] = 0; });
     n.tasks.forEach(function (t) { if (t && Object.prototype.hasOwnProperty.call(counts, t.status)) counts[t.status]++; });
     var pr = typeof n.project.overall_progress === 'number' ? n.project.overall_progress
       : (n.tasks.length ? Math.round(counts.done / n.tasks.length * 100) : 0);
+    detectHandoffs(n);
     D = {
       ok: !!n.ok,
       counts: counts,
@@ -452,7 +442,11 @@
       progress: pr,
       events: (n.meta.recent_events || []).slice().sort(function (a, b) { return (Date.parse(b.ts) || 0) - (Date.parse(a.ts) || 0); }),
       live: !!(meta && meta.live),
+      meetings: n.meetings || null,
+      chat: n.chat || null,
+      phone: n.phone || null,
     };
+    HAS_APPLIED = true;
     applyRoles();
   }
 
@@ -469,6 +463,9 @@
   function init() {
     cv = document.getElementById('c'); ctx = cv.getContext('2d');
     cardEl = document.getElementById('card');
+    var FUR = global.STUDIO_FURNITURE.create({ ctx: ctx, iso: iso, box: box, blob: blob, rr: rr, mixc: mixc });
+    deskSet = FUR.deskSet; chair = FUR.chair; plant = FUR.plant; rack = FUR.rack;
+    shelf = FUR.shelf; table = FUR.table; boardFixture = FUR.board;
     resize(); fitBase();
     apply(global.VCNP ? global.VCNP.normalize(global.VCNP_DATA || null) : null, { live: false });
     clock(); global.setInterval(clock, 20000);
@@ -495,5 +492,5 @@
     };
   }
 
-  global.VCNPStudio = { init: init, apply: apply };
+  global.VCNPStudio = { init: init, apply: apply, pulse: pulse };
 })(typeof window !== 'undefined' ? window : this);
