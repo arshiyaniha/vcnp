@@ -1,14 +1,14 @@
 {
   "schema_version": "1.0",
-  "generated_ts": "2026-08-24T17:40:37.090Z",
+  "generated_ts": "2026-08-26T09:04:37.762Z",
   "note": "raw signals only — all animation logic lives in the dashboard app (plan §6.3)",
   "roles": [
     {
       "role": "ceo",
-      "active_role": true,
-      "last_event_time": "2026-08-24T17:40:36.948Z",
-      "mood": "thinking",
-      "energy_hint": 100
+      "active_role": false,
+      "last_event_time": "2026-08-24T18:38:35.970Z",
+      "mood": "sleeping",
+      "energy_hint": 0
     },
     {
       "role": "planner",
@@ -19,24 +19,24 @@
     },
     {
       "role": "orchestrator",
-      "active_role": false,
-      "last_event_time": "2026-08-24T16:50:05.790Z",
+      "active_role": true,
+      "last_event_time": "2026-08-26T09:04:37.756Z",
       "mood": "thinking",
-      "energy_hint": 49
+      "energy_hint": 100
     },
     {
       "role": "executor",
       "active_role": false,
-      "last_event_time": "2026-08-24T16:50:05.811Z",
-      "mood": "working",
-      "energy_hint": 49
+      "last_event_time": "2026-08-25T12:17:50.510Z",
+      "mood": "sleeping",
+      "energy_hint": 0
     },
     {
       "role": "qa",
       "active_role": false,
-      "last_event_time": "2026-08-24T16:50:05.804Z",
-      "mood": "meeting",
-      "energy_hint": 49
+      "last_event_time": "2026-08-25T12:17:50.508Z",
+      "mood": "sleeping",
+      "energy_hint": 0
     },
     {
       "role": "security",

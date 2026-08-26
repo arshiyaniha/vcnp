@@ -17,6 +17,64 @@ const store = require('../store');
 const DASHBOARD_DATA_FILE = path.join(store.OFFICE_DIR, 'dashboard-data.js');
 const RECENT_EVENTS_LIMIT = 25;
 
+/*
+ * Time tunables (live-office plan §4.3) — env-overridable, read at CALL time
+ * so tests can override per invocation without re-requiring this module.
+ * Primary env names follow the Phase-1 contract; the design doc's
+ * VCNP_OFFICE_ACTIVE_MIN is honored as an alias for ACTIVE_THRESHOLD_MIN.
+ */
+const DEFAULT_TUNABLES = Object.freeze({
+  ACTIVE_THRESHOLD_MIN: 30,   // active_role cutoff (was hardcoded `ageMin < 30`)
+  ENERGY_DECAY_MIN: 100,      // linear decay horizon (was hardcoded `100 - ageMin`)
+  SLEEP_AFTER_MIN: 60,        // mood 'sleeping' cutoff
+  COFFEE_AFTER_DONE_MIN: 20,  // post-done coffee window
+});
+
+function tunables() {
+  const num = (v, dflt) => {
+    const n = Number.parseFloat(v);
+    return Number.isFinite(n) && n >= 0 ? n : dflt;
+  };
+  return {
+    ACTIVE_THRESHOLD_MIN: num(
+      process.env.VCNP_ACTIVE_THRESHOLD_MIN ?? process.env.VCNP_OFFICE_ACTIVE_MIN,
+      DEFAULT_TUNABLES.ACTIVE_THRESHOLD_MIN
+    ),
+    ENERGY_DECAY_MIN: num(process.env.VCNP_ENERGY_DECAY_MIN, DEFAULT_TUNABLES.ENERGY_DECAY_MIN),
+    SLEEP_AFTER_MIN: num(process.env.VCNP_SLEEP_AFTER_MIN, DEFAULT_TUNABLES.SLEEP_AFTER_MIN),
+    COFFEE_AFTER_DONE_MIN: num(process.env.VCNP_COFFEE_AFTER_DONE_MIN, DEFAULT_TUNABLES.COFFEE_AFTER_DONE_MIN),
+  };
+}
+
+/*
+ * Explicit action→mood map (plan §4.3) — replaces the buggy substring regex
+ * `/meeting|gate|standup|review/` whose `review` alternative matched inside
+ * qa_review_passed and pinned QA to 'meeting' forever.
+ * A null value falls through to role defaults; unknown actions fall through too.
+ */
+const MOOD_BY_ACTION = {
+  qa_review_passed: 'working',
+  qa_review_rejected: 'frustrated',
+  qa_gate_started: 'meeting',
+  meeting_started: 'meeting',
+  meeting_ended: null,
+  task_created: 'thinking',
+  task_assigned: 'working',
+  message_posted: 'alert',
+  message_answered: 'talking',
+  phone_call_received: 'phone',
+  work_logged: 'working',
+};
+
+/*
+ * Fallback for unlisted meeting-ish actions (standup_held, emergency_gate, …).
+ * The design doc sketches /\b(meeting|gate|standup)\b/i, but '_' is a regex
+ * word character, so \b NEVER matches inside snake_case (qa_gate_started).
+ * These boundaries treat '_' as a separator while still rejecting innocent
+ * substrings like 'investigate' — the original bug class, not repeated.
+ */
+const MEETING_FALLBACK_RE = /(?:^|[^a-z])(meeting|gate|standup)(?:$|[^a-z])/i;
+
 const ROLES = ['ceo', 'planner', 'orchestrator', 'executor', 'qa', 'security', 'rc', 'librarian', 'devops'];
 const COLUMNS = [
   ['todo', 'Todo'],
@@ -79,18 +137,20 @@ function deriveOfficeLive(events) {
       roles[r]._latest = ev;
     }
   }
+  const T = tunables();
   for (const r of Object.values(roles)) {
     const latest = r._latest;
     delete r._latest;
     if (!latest) continue;
     const ageMin = (now - Date.parse(latest.ts)) / 60000;
-    r.active_role = ageMin < 30;
-    r.energy_hint = Math.max(0, Math.round(100 - ageMin));
+    r.active_role = ageMin < T.ACTIVE_THRESHOLD_MIN;
+    r.energy_hint = Math.max(0, Math.min(100, Math.round(100 - (ageMin * 100) / T.ENERGY_DECAY_MIN)));
     const action = String(latest.action || '');
-    if (ageMin >= 60) r.mood = 'sleeping';
-    else if (/meeting|gate|standup|review/.test(action)) r.mood = 'meeting';
-    else if (action === 'task_updated' && latest.status === 'done' && ageMin < 20) r.mood = 'coffee';
-    else if (['planner', 'orchestrator', 'ceo'].includes(r.role)) r.mood = 'thinking';
+    if (ageMin >= T.SLEEP_AFTER_MIN) r.mood = 'sleeping';
+    else if (MOOD_BY_ACTION[action]) r.mood = MOOD_BY_ACTION[action];
+    else if (MEETING_FALLBACK_RE.test(action)) r.mood = 'meeting';
+    else if (action === 'task_updated' && latest.status === 'done' && ageMin < T.COFFEE_AFTER_DONE_MIN) r.mood = 'coffee';
+    else if (r.role === 'planner' || r.role === 'orchestrator' || r.role === 'ceo') r.mood = 'thinking';
     else r.mood = 'working';
   }
   return {
@@ -162,4 +222,14 @@ const defs = [
   },
 ];
 
-module.exports = { defs, generate, deriveOfficeLive, renderBoard, writeDashboardData };
+module.exports = {
+  defs,
+  generate,
+  deriveOfficeLive,
+  renderBoard,
+  writeDashboardData,
+  DEFAULT_TUNABLES,
+  tunables,
+  MOOD_BY_ACTION,
+  MEETING_FALLBACK_RE,
+};

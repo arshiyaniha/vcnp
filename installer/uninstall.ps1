@@ -103,8 +103,19 @@ switch ($out) {
 $Office = Join-Path $Target 'office'
 if ($DeleteOffice) {
     if (Test-Path -LiteralPath $Office) {
-        Remove-Item -LiteralPath $Office -Recurse -Force
-        Write-Host "  - deleted office/ (shared state removed): $Office"
+        # Identity guard: only delete a folder that IS a VCNP office (has at
+        # least one of its marker files). A bare 'office/' dir could belong
+        # to anything — never recurse-delete it on guesswork.
+        $isVcnpOffice =
+            (Test-Path -LiteralPath (Join-Path $Office 'events.log.jsonl') -PathType Leaf) -or
+            (Test-Path -LiteralPath (Join-Path $Office 'state.json') -PathType Leaf) -or
+            (Test-Path -LiteralPath (Join-Path $Office 'BOARD.md') -PathType Leaf)
+        if ($isVcnpOffice) {
+            Remove-Item -LiteralPath $Office -Recurse -Force
+            Write-Host "  - deleted office/ (shared state removed): $Office"
+        } else {
+            Fail "refusing to delete '$Office': no VCNP office markers (events.log.jsonl / state.json / BOARD.md) found — if you are sure it is disposable, remove it manually." "حذف ‎office/ رد شد: هیچ نشانه‌ای از دفتر وی‌سی‌ان‌پی (events.log.jsonl / state.json / BOARD.md) پیدا نشد — اگر مطمئنید قابل‌حذف است، دستی حذفش کنید."
+        }
     } else {
         Write-Host "  = office/ not found — nothing to delete."
     }

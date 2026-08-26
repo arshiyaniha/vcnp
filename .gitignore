@@ -6,8 +6,8 @@
 .claude-flow/logs/
 .claude-flow/sessions/
 
-# Codex local configuration
-.codex/
+# Codex local configuration (root only — never hide nested adapter dirs)
+/.codex/
 # Claude Flow runtime data
 # Environment variables
 
@@ -17,3 +17,9 @@ ruvector.db
 node_modules/
 office/.lock
 *.tmp
+
+# VCNP office runtime data — llm_batch writes full prompts/responses
+# (jobs.json, failed.jsonl, .cache/) and telemetry holds per-call usage;
+# both stay local, the ledger events.log.jsonl remains tracked.
+office/batches/
+office/telemetry.jsonl

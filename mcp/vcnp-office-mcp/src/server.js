@@ -27,8 +27,22 @@ const routerDefs = require('./tools/router').defs;
 const batchDefs = require('./tools/batch').defs;
 const reportDefs = require('./tools/report').defs;
 const compactionDefs = require('./tools/compaction').defs;
+const demoResetDefs = require('./tools/demo-reset').defs;
 
-const TOOLS = [...boardDefs, ...ledgerDefs, ...routerDefs, ...batchDefs, ...reportDefs, ...compactionDefs];
+// Post-append mirror refresh (live-office plan §4.1a): every successful
+// ledger append regenerates BOARD.md / office-live.json / dashboard-data.js
+// under the office lock, deduped via office/.mirrors-stamp.
+require('./hooks/mirrors').register();
+
+const TOOLS = [
+  ...boardDefs,
+  ...ledgerDefs,
+  ...routerDefs,
+  ...batchDefs,
+  ...reportDefs,
+  ...compactionDefs,
+  ...demoResetDefs,
+];
 const byName = new Map(TOOLS.map((t) => [t.name, t]));
 
 function send(obj) {
@@ -113,6 +127,15 @@ async function handleMessage(msg) {
 }
 
 const rl = readline.createInterface({ input: process.stdin, terminal: false });
+
+/*
+ * Drain-before-exit: every dispatched message's promise is tracked, and
+ * shutdown waits (bounded by a grace timeout) for in-flight handlers to
+ * finish so a ledger write is never killed mid-flight. Without this,
+ * closing stdin while a handler awaited the lock silently lost the
+ * request: no response, no ledger event, no error anywhere.
+ */
+const inflight = new Set();
 rl.on('line', (line) => {
   const t = line.trim();
   if (!t) return;
@@ -123,11 +146,26 @@ rl.on('line', (line) => {
     stderr('ignoring non-JSON line');
     return;
   }
-  handleMessage(msg).catch((err) => stderr('handler error: ' + (err && err.message)));
+  const p = handleMessage(msg);
+  inflight.add(p);
+  p.finally(() => inflight.delete(p)).catch(() => {});
 });
-rl.on('close', () => process.exit(0));
-process.on('SIGINT', () => process.exit(0));
-process.on('SIGTERM', () => process.exit(0));
+
+let shuttingDown = false;
+function gracefulExit(graceMs) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  const force = setTimeout(() => process.exit(0), graceMs);
+  if (typeof force.unref === 'function') force.unref();
+  Promise.allSettled([...inflight]).then(() => {
+    clearTimeout(force);
+    process.exit(0);
+  });
+}
+
+rl.on('close', () => gracefulExit(5000)); // client closed stdin — let writes land
+process.on('SIGINT', () => gracefulExit(1000));
+process.on('SIGTERM', () => gracefulExit(1000));
 process.on('unhandledRejection', (err) => stderr('unhandled rejection: ' + ((err && err.stack) || err)));
 
 stderr(`ready — ${TOOLS.length} tools — workspace: ${store.WORKSPACE}`);

@@ -144,6 +144,28 @@ identity when tracked or untracked changes exist, so a release receipt must
 bind a clean commit or an immutable snapshot including those changes.
 
 
+## Office Ledger Protocol (all VCNP modes)
+
+All roles make their presence real in the append-only office ledger
+(`office/events.log.jsonl` — the single source of truth) through the
+**vcnp-office-mcp** MCP server. Mirrors (`office/BOARD.md`, `office/office-live.json`,
+`office/dashboard-data.js`) regenerate automatically after every successful append —
+NEVER edit the ledger or mirrors by hand.
+
+1. **Session start** — first MCP call of every session:
+   `event_log { actor: "<role>", action: "session_lifecycle", detail: { phase: "start", session_id: "<id>" } }`
+2. **Real work** — one event per meaningful unit, with real artifact paths:
+   `event_log { actor: "<role>", action: "work_logged", detail: { task_id: "T-NNN", action_summary: "...", artifact_refs: ["<workspace-relative path>"] } }`
+3. **Status channel** — board status changes go ONLY through `task_create` / `task_update` / `task_assign`.
+4. **Session end** — last MCP call of every session: same as (1) with `phase: "end"`.
+5. **Inbox duty (protocol)** — at session start and after milestones, check your messages
+   (`inbox_count` / `inbox_list` / `inbox_reply` — arriving in a later phase) and answer
+   pending items; first answer wins, never fabricate replies.
+6. **Demo reset** — only `office_archive_reset` may rotate the ledger (archives to
+   `office/archive/`, never deletes; refuses while another process holds the lock).
+
+Roo-mode equivalents live in [`adapters/roo/rules/`](adapters/roo/rules/).
+
 ## MCP Integration
 
 Use MCP tools for coordination, then keep coding:

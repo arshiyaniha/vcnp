@@ -105,7 +105,7 @@ async function main() {
     const names = new Set((list.result.tools || []).map((t) => t.name));
     const requiredTools = ['board_init', 'task_create', 'task_update', 'task_assign', 'board_read',
       'ledger_log', 'event_log', 'telemetry_read', 'route_model', 'llm_batch_submit',
-      'llm_batch_status', 'report_generate', 'compaction_ack'];
+      'llm_batch_status', 'report_generate', 'compaction_ack', 'office_archive_reset'];
     const missing = requiredTools.filter((t) => !names.has(t));
     check(`tools/list exposes all ${requiredTools.length} tools`, missing.length === 0, 'missing: ' + missing.join(','));
 

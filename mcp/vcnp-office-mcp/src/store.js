@@ -1,7 +1,9 @@
 'use strict';
 
 /*
- * VCNP Office store — ledger/state engine.
+ * VCNP Office store — workspace paths, domain operations, telemetry/catalog.
+ * Facade over lib/ modules (lock / ledger-engine / envelope); the public
+ * export surface is unchanged, so tools/*.js keep working untouched.
  *
  * Blueprint: plans/vcnp-vibe-office-plan.md §6 (shared state + concurrency
  * model items 1-5) and skills/core-board-ops/SKILL.md (ledger-first write
@@ -9,27 +11,30 @@
  *
  * Concurrency model (plan §6.2):
  *   1. Ledger-first: office/events.log.jsonl is the ONLY source of truth.
- *      Appends are guarded by an exclusive-create lock (office/.lock,
- *      O_EXCL semantics) with retry/backoff and stale-lock takeover after
- *      5 s; the write itself is an O_APPEND-style fs.appendFileSync.
- *   2. Derived state: office/state.json is NEVER written in place — it is
- *      rebuilt from the full ledger into state.json.tmp, then ATOMICALLY
- *      renamed over the old file.
- *   3. Idempotent appends: every event carries a UUID event_id; duplicate
- *      deliveries are detected under the lock and dropped silently.
- *   4. Cross-process truth: there is NO central live view of sessions; each
- *      session's own MCP process writes util events for ITS session, and
- *      gates (task_assign) read the LATEST util event per session from the
- *      ledger — eventually consistent, by design.
+ *      Appends are guarded by an exclusive-create lock (office/.lock) with
+ *      retry/backoff, heartbeat-refreshed stale takeover and dead-holder
+ *      fast takeover (lib/lock.js).
+ *   2. Derived state: office/state.json is NEVER written in place — temp
+ *      file + atomic rename only (lib/ledger-engine.js).
+ *   3. Idempotent appends: duplicate event_id deliveries are dropped under
+ *      the lock.
+ *   4. Cross-process truth: no central live view; gates read the LATEST
+ *      util event per session from the ledger — eventually consistent.
+ *
+ * Race-safety notes (review findings 1 & 10 fixed here):
+ *   - Task IDs are allocated INSIDE the lock from a fresh fold, so two
+ *     concurrent task_create calls can never both receive T-001.
+ *   - Domain ops return values derived from their own locked snapshot /
+ *     arguments instead of re-reading shared state after the append, so a
+ *     concurrent writer can never make a response describe another task.
  */
 
 const fs = require('fs');
 const path = require('path');
-const crypto = require('crypto');
 
-const SCHEMA_VERSION = '1.0';
-const STALE_LOCK_MS = 5000;      // stale-lock takeover threshold (hard constraint)
-const LOCK_DEADLINE_MS = 10000;  // give up acquiring the lock after 10 s
+const lockLib = require('./lib/lock');
+const envelope = require('./lib/envelope');
+const { createLedgerEngine } = require('./lib/ledger-engine');
 
 /* ------------------------------------------------------------------ */
 /* Workspace resolution                                                */
@@ -60,6 +65,7 @@ const OFFICE_DIR = path.join(WORKSPACE, 'office');
 const LEDGER_FILE = path.join(OFFICE_DIR, 'events.log.jsonl');
 const STATE_FILE = path.join(OFFICE_DIR, 'state.json');
 const LOCK_FILE = path.join(OFFICE_DIR, '.lock');
+const MIRRORS_STAMP_FILE = path.join(OFFICE_DIR, '.mirrors-stamp');
 const TELEMETRY_FILE = path.join(OFFICE_DIR, 'telemetry.jsonl');
 const MODELS_FILE = path.join(OFFICE_DIR, 'models.json');
 const BATCHES_DIR = path.join(OFFICE_DIR, 'batches');
@@ -68,15 +74,25 @@ const BOARD_FILE = path.join(OFFICE_DIR, 'BOARD.md');
 const OFFICE_LIVE_FILE = path.join(OFFICE_DIR, 'office-live.json');
 const ACTIVE_CONTEXT_FILE = path.join(OFFICE_DIR, 'memory-bank', 'activeContext.md');
 
+const engine = createLedgerEngine({ officeDir: OFFICE_DIR, ledgerFile: LEDGER_FILE, stateFile: STATE_FILE });
+
 /* ------------------------------------------------------------------ */
-/* Small fs helpers                                                    */
+/* Re-exported constants + primitives (stable facade surface)          */
 /* ------------------------------------------------------------------ */
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const SCHEMA_VERSION = engine.SCHEMA_VERSION;
+const {
+  ENVELOPE_STATUSES,
+  BOARD_STATUSES,
+  TASK_CLASSES,
+  LEDGER_SOURCES,
+  SCHEMA_NOTE,
+  boardStatusForReportStatus,
+  validateTaskBriefInput,
+  validateResultReportPatch,
+} = envelope;
 
-function ensureOfficeDir() {
-  fs.mkdirSync(OFFICE_DIR, { recursive: true });
-}
+const ensureOfficeDir = engine.ensureOfficeDir;
 
 function ensureSubdirs() {
   ensureOfficeDir();
@@ -84,106 +100,88 @@ function ensureSubdirs() {
   fs.mkdirSync(CACHE_DIR, { recursive: true });
 }
 
-/** Atomic write: temp file + rename (never write state in place). */
-function atomicWriteText(file, text) {
-  const tmp = file + '.tmp';
-  fs.writeFileSync(tmp, text);
-  fs.renameSync(tmp, file);
-}
-
-function atomicWriteJson(file, obj) {
-  atomicWriteText(file, JSON.stringify(obj, null, 2) + '\n');
-}
+const atomicWriteText = engine.atomicWriteText;
+const atomicWriteJson = engine.atomicWriteJson;
+const readEvents = engine.readEvents;
+const rebuildState = engine.rebuildState;
+const getState = engine.getState;
+const nextTaskId = engine.nextTaskId;
+const ledgerStamp = engine.ledgerStamp;
 
 /* ------------------------------------------------------------------ */
-/* Exclusive-create lock (retry + stale takeover)                      */
+/* Post-append mirror hooks (live-office plan §4.1a/D2)                */
 /* ------------------------------------------------------------------ */
 
-async function acquireLock() {
-  ensureOfficeDir();
-  const deadline = Date.now() + LOCK_DEADLINE_MS;
-  let backoff = 20;
-  for (;;) {
-    let fd;
+const postAppendHooks = [];
+let appendDirty = false;
+let mirrorsHookEnsured = false;
+
+/**
+ * Register fn to run after successful non-duplicate appends at the END of
+ * the current withLock critical section — while the office lock is STILL
+ * HELD. fn receives ({ events, state }) and MUST NOT acquire the office
+ * lock itself: lib/lock.js has no re-entrancy (same-PID reacquire is
+ * excluded), so a nested withLock would spin into its 10 s deadline.
+ */
+function registerPostAppendHook(fn) {
+  if (typeof fn === 'function' && !postAppendHooks.includes(fn)) postAppendHooks.push(fn);
+}
+
+/**
+ * Wrapped engine primitive: marks the locked section dirty on a REAL append.
+ * Duplicate event_id deliveries stay silent → no mirror regen (plan §10).
+ */
+async function appendEventLocked(fields, opts) {
+  const r = await engine.appendEventLocked(fields, opts);
+  if (!r.duplicate) appendDirty = true;
+  return r;
+}
+
+/** Load src/hooks/mirrors.js once, lazily (runtime require — cycle-safe). */
+function ensureMirrorsHook() {
+  if (mirrorsHookEnsured) return;
+  mirrorsHookEnsured = true;
+  try { require('./hooks/mirrors').register(); } catch (_) { /* mirrors stay manual */ }
+}
+
+/**
+ * Flush queued hooks once per lock section, UNDER the lock, after fn
+ * settled (finally: even an op that appended and then threw still refreshes
+ * the mirrors). Best-effort: a hook failure never fails the ledger write
+ * that already succeeded, nor masks the caller's own exception.
+ */
+async function flushPostAppendHooks() {
+  if (!appendDirty) return;
+  appendDirty = false;
+  try { ensureMirrorsHook(); } catch (_) { /* ignore */ }
+  if (postAppendHooks.length === 0) return;
+  let snapshot;
+  try {
+    snapshot = { events: readEvents(), state: engine.foldState() };
+  } catch (_) {
+    return;
+  }
+  for (const hook of postAppendHooks) {
     try {
-      fd = fs.openSync(LOCK_FILE, 'wx'); // exclusive create — fails with EEXIST if held
-      fs.writeSync(fd, JSON.stringify({ pid: process.pid, ts: new Date().toISOString() }));
-      fs.closeSync(fd);
-      return;
+      await hook(snapshot);
     } catch (err) {
-      if (err.code !== 'EEXIST') throw err;
-      // Stale-lock takeover: holder crashed or wedged > STALE_LOCK_MS ago.
-      try {
-        const st = fs.statSync(LOCK_FILE);
-        if (Date.now() - st.mtimeMs > STALE_LOCK_MS) {
-          try { fs.unlinkSync(LOCK_FILE); } catch (_) { /* someone else took it */ }
-          continue;
-        }
-      } catch (_) { /* lock vanished — retry immediately */ }
-      if (Date.now() > deadline) {
-        throw new Error(`could not acquire office lock ${LOCK_FILE} within ${LOCK_DEADLINE_MS}ms`);
-      }
-      await sleep(backoff + Math.floor(Math.random() * 20)); // small jittered backoff
-      backoff = Math.min(backoff * 2, 200);
+      process.stderr.write(`[vcnp-office-mcp] post-append hook failed: ${(err && err.message) || err}\n`);
     }
   }
 }
 
-function releaseLock() {
-  try { fs.unlinkSync(LOCK_FILE); } catch (_) { /* already gone */ }
-}
-
-/** Run fn while holding the office lock. Releases even if fn throws. */
-async function withLock(fn) {
-  await acquireLock();
-  try {
-    return await fn();
-  } finally {
-    releaseLock();
-  }
-}
-
-/* ------------------------------------------------------------------ */
-/* Ledger primitives                                                   */
-/* ------------------------------------------------------------------ */
-
-/** Parse the ledger, skipping blank/corrupt lines. Missing file -> []. */
-function readEvents() {
-  if (!fs.existsSync(LEDGER_FILE)) return [];
-  const out = [];
-  const raw = fs.readFileSync(LEDGER_FILE, 'utf8');
-  for (const line of raw.split('\n')) {
-    const t = line.trim();
-    if (!t) continue;
-    try {
-      const obj = JSON.parse(t);
-      if (obj && typeof obj === 'object') out.push(obj);
-    } catch (_) { /* corrupt line — skip, never crash replay */ }
-  }
-  return out;
-}
-
 /**
- * Append an event. Caller may pass event_id to make retries idempotent:
- * a duplicate event_id is skipped SILENTLY (returns { duplicate: true }).
- * Otherwise a fresh UUID v4 + ISO ts + schema_version are stamped.
- * MUST be called while holding the lock (see appendEvent / withLock).
+ * Acquire the office lock, run fn, flush post-append hooks (still under the
+ * lock), always release.
  */
-async function appendEventLocked(fields) {
-  ensureOfficeDir();
-  const eventId = fields.event_id || crypto.randomUUID();
-  const seen = new Set(readEvents().map((e) => e.event_id));
-  if (seen.has(eventId)) return { duplicate: true, event_id: eventId };
-  const evt = { event_id: eventId, ts: new Date().toISOString(), schema_version: SCHEMA_VERSION };
-  if (fields.actor !== undefined) evt.actor = fields.actor;
-  if (fields.action !== undefined) evt.action = fields.action;
-  for (const [k, v] of Object.entries(fields)) {
-    if (k === 'event_id' || k === 'ts' || k === 'schema_version' || k === 'actor' || k === 'action') continue;
-    evt[k] = v;
-  }
-  fs.appendFileSync(LEDGER_FILE, JSON.stringify(evt) + '\n'); // O_APPEND-style append
-  rebuildState();
-  return { duplicate: false, event: evt };
+function withLock(fn) {
+  return lockLib.withLock(LOCK_FILE, async () => {
+    try {
+      return await fn();
+    } finally {
+      await flushPostAppendHooks();
+    }
+  });
 }
 
 /** Acquire the lock, append, rebuild derived state, release. */
@@ -192,194 +190,8 @@ async function appendEvent(fields) {
 }
 
 /* ------------------------------------------------------------------ */
-/* Derived state                                                       */
-/* ------------------------------------------------------------------ */
-
-/** Fold the full ledger into a fresh state object and atomically persist it. */
-function rebuildState(eventsArg) {
-  const events = eventsArg || readEvents();
-  const state = {
-    schema_version: SCHEMA_VERSION,
-    project: { name: null, goal: null, overall_progress: 0 },
-    tasks: [],
-    events_count: events.length,
-  };
-  const byId = new Map();
-  for (const ev of events) {
-    if (ev.action === 'project_bootstrapped' || ev.action === 'board_init') {
-      if (ev.project_name) state.project.name = ev.project_name;
-      if (ev.goal) state.project.goal = ev.goal;
-    } else if (ev.action === 'task_created') {
-      const task = {
-        task_id: ev.task_id,
-        title: ev.title,
-        assignee_role: ev.assignee_role || null,
-        task_class: ev.task_class || null,
-        budget_tokens: ev.budget_tokens || null,
-        acceptance_criteria: ev.acceptance_criteria || [],
-        context_refs: ev.context_refs || [],
-        priority: ev.priority || null,
-        definition_of_done: ev.definition_of_done || null,
-        status: 'todo',
-        progress_percent: 0,
-        artifacts: [],
-        blockers: [],
-        notes_for_qa: '',
-        created_ts: ev.ts,
-        updated_ts: ev.ts,
-        reports: [],
-      };
-      byId.set(ev.task_id, task);
-      state.tasks.push(task);
-    } else if (ev.action === 'task_updated') {
-      const t = byId.get(ev.task_id);
-      if (!t) continue;
-      if (ev.board_status) t.status = ev.board_status;
-      else if (ev.status) t.status = boardStatusForReportStatus(ev.status);
-      if (typeof ev.progress_percent === 'number') t.progress_percent = ev.progress_percent;
-      if (Array.isArray(ev.artifacts)) {
-        for (const a of ev.artifacts) if (!t.artifacts.includes(a)) t.artifacts.push(a);
-      }
-      if (Array.isArray(ev.blockers)) t.blockers = ev.blockers.slice();
-      if (typeof ev.notes_for_qa === 'string') t.notes_for_qa = ev.notes_for_qa;
-      t.updated_ts = ev.ts;
-      t.reports.push({ ts: ev.ts, status: ev.status || null, progress_percent: ev.progress_percent ?? null });
-    } else if (ev.action === 'task_assigned') {
-      const t = byId.get(ev.task_id);
-      if (!t) continue;
-      if (ev.role) t.assignee_role = ev.role;
-      if (ev.session_id) t.assignee_session = ev.session_id;
-      t.status = 'doing';
-      t.updated_ts = ev.ts;
-    }
-  }
-  const total = state.tasks.length;
-  state.project.overall_progress = total
-    ? Math.round(state.tasks.reduce((s, t) => s + (t.progress_percent || 0), 0) / total)
-    : 0;
-  atomicWriteJson(STATE_FILE, state);
-  return state;
-}
-
-function getState() {
-  try {
-    return JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
-  } catch (_) {
-    return rebuildState();
-  }
-}
-
-/* ------------------------------------------------------------------ */
-/* Envelope validation — lightweight approximation                     */
-/* ------------------------------------------------------------------ */
-
-const ENVELOPE_STATUSES = ['done', 'blocked', 'needs_input'];
-const BOARD_STATUSES = ['todo', 'doing', 'awaiting_orchestrator', 'review', 'blocked', 'done'];
-const TASK_CLASSES = ['C0', 'C1', 'C2', 'C3', 'C4'];
-const LEDGER_SOURCES = ['provider_usage', 'ide_export', 'estimated'];
-
-/*
- * HONEST NOTE: skills/core-protocol/references/envelope-schema.json is a full
- * JSON Schema (oneOf over taskBrief/resultReport, if/then, additionalProperties).
- * This validator implements targeted required-field/type/enum/minItems checks
- * against that schema's contracts; it does NOT implement general JSON-Schema
- * evaluation. It rejects everything the schema rejects for these fields, but
- * full spec compliance would require a JSON-Schema library (zero-dep constraint).
- */
-const SCHEMA_NOTE =
-  'validation is a lightweight approximation of skills/core-protocol/references/envelope-schema.json ' +
-  '(required fields / types / enums / minItems / the done->blockers if-then rule); full JSON-Schema ' +
-  'evaluation is intentionally not implemented (zero-dependency constraint)';
-
-/** Map a Result-Report status onto the board kanban status (protocol §3). */
-function boardStatusForReportStatus(status) {
-  if (status === 'done') return 'awaiting_orchestrator'; // written queue
-  if (status === 'blocked' || status === 'needs_input') return 'blocked';
-  return status;
-}
-
-/** Validate task_create input against the Task Brief contract. */
-function validateTaskBriefInput(a) {
-  const errs = [];
-  if (typeof a.title !== 'string' || !a.title.trim()) {
-    errs.push("'title' must be a non-empty string (envelope-schema.json #/taskBrief/properties/title, minLength: 1)");
-  }
-  if (!TASK_CLASSES.includes(a.task_class)) {
-    errs.push(`'task_class' must be one of ${TASK_CLASSES.join('|')} (#/taskBrief/properties/taskClass enum)`);
-  }
-  if (
-    !Array.isArray(a.acceptance_criteria) ||
-    a.acceptance_criteria.length < 1 ||
-    !a.acceptance_criteria.every((x) => typeof x === 'string' && x.trim())
-  ) {
-    errs.push("'acceptance_criteria' must be an array with at least 1 non-empty string (#/taskBrief/properties/acceptance_criteria, minItems: 1)");
-  }
-  if (!Number.isInteger(a.budget_tokens) || a.budget_tokens <= 0) {
-    errs.push("'budget_tokens' must be an integer > 0 (#/taskBrief/properties/budget_tokens, type: integer, exclusiveMinimum: 0)");
-  }
-  if (a.assignee_role !== undefined && (typeof a.assignee_role !== 'string' || !a.assignee_role.trim())) {
-    errs.push("'assignee_role' must be a non-empty string when provided");
-  }
-  if (a.priority !== undefined && !['low', 'medium', 'high', 'critical'].includes(a.priority)) {
-    errs.push("'priority' must be one of low|medium|high|critical (#/taskBrief/properties/priority enum)");
-  }
-  if (a.context_refs !== undefined && !(Array.isArray(a.context_refs) && a.context_refs.every((x) => typeof x === 'string' && x))) {
-    errs.push("'context_refs' must be an array of non-empty strings (#/taskBrief/properties/context_refs)");
-  }
-  if (a.definition_of_done !== undefined && (typeof a.definition_of_done !== 'string' || !a.definition_of_done.trim())) {
-    errs.push("'definition_of_done' must be a non-empty string (#/taskBrief/properties/definition_of_done, minLength: 1)");
-  }
-  return errs;
-}
-
-/**
- * Validate a Result-Report-shaped task_update patch against the resultReport
- * contract. Unknown keys are rejected (additionalProperties: false).
- */
-function validateResultReportPatch(patch) {
-  const errs = [];
-  const allowed = ['status', 'progress_percent', 'artifacts', 'blockers', 'notes_for_qa', 'board_status'];
-  for (const k of Object.keys(patch)) {
-    if (!allowed.includes(k)) {
-      errs.push(`'${k}' is not allowed in a Result Report update (envelope-schema.json #/resultReport, additionalProperties: false)`);
-    }
-  }
-  if (patch.status !== undefined && !ENVELOPE_STATUSES.includes(patch.status) && !BOARD_STATUSES.includes(patch.status)) {
-    errs.push(`'status' must be one of ${ENVELOPE_STATUSES.join('|')} (Result Report) or a board status ${BOARD_STATUSES.join('|')} (#/resultReport/properties/status enum)`);
-  }
-  if (patch.progress_percent !== undefined && (!Number.isInteger(patch.progress_percent) || patch.progress_percent < 0 || patch.progress_percent > 100)) {
-    errs.push("'progress_percent' must be an integer between 0 and 100 (#/resultReport/properties/progress_percent, minimum: 0, maximum: 100)");
-  }
-  if (patch.artifacts !== undefined && !(Array.isArray(patch.artifacts) && patch.artifacts.every((x) => typeof x === 'string' && x))) {
-    errs.push("'artifacts' must be an array of non-empty strings (#/resultReport/properties/artifacts)");
-  }
-  if (patch.blockers !== undefined && !(Array.isArray(patch.blockers) && patch.blockers.every((x) => typeof x === 'string'))) {
-    errs.push("'blockers' must be an array of strings (#/resultReport/properties/blockers)");
-  }
-  if (patch.notes_for_qa !== undefined && typeof patch.notes_for_qa !== 'string') {
-    errs.push("'notes_for_qa' must be a string (#/resultReport/properties/notes_for_qa)");
-  }
-  if (patch.board_status !== undefined && !BOARD_STATUSES.includes(patch.board_status)) {
-    errs.push(`'board_status' must be one of ${BOARD_STATUSES.join('|')} (board management vocabulary)`);
-  }
-  if (patch.status === 'done' && Array.isArray(patch.blockers) && patch.blockers.length > 0) {
-    errs.push("'blockers' must be EMPTY when status='done' (envelope-schema.json #/resultReport if/then: status done -> blockers maxItems: 0)");
-  }
-  return errs;
-}
-
-/* ------------------------------------------------------------------ */
 /* Domain operations                                                   */
 /* ------------------------------------------------------------------ */
-
-function nextTaskId(state) {
-  let max = 0;
-  for (const t of state.tasks || []) {
-    const m = /^T-(\d+)$/.exec(t.task_id || '');
-    if (m) max = Math.max(max, parseInt(m[1], 10));
-  }
-  return 'T-' + String(max + 1).padStart(3, '0');
-}
 
 async function bootstrap(project_name, goal) {
   if (typeof project_name !== 'string' || !project_name.trim()) {
@@ -388,9 +200,16 @@ async function bootstrap(project_name, goal) {
   if (typeof goal !== 'string' || !goal.trim()) {
     return { ok: false, error: "'goal' must be a non-empty string" };
   }
-  const r = await appendEvent({ actor: 'orchestrator', action: 'board_init', project_name, goal });
-  const state = getState();
-  return { ok: true, project: state.project, event_id: r.event.event_id };
+  return withLock(async () => {
+    const events = readEvents();
+    const before = engine.stateFromEvents(events);
+    const r = await appendEventLocked({ actor: 'orchestrator', action: 'board_init', project_name, goal }, { events });
+    return {
+      ok: true,
+      project: { name: project_name, goal, overall_progress: before.project.overall_progress },
+      event_id: r.event.event_id,
+    };
+  });
 }
 
 async function taskCreate(args) {
@@ -398,51 +217,85 @@ async function taskCreate(args) {
   if (errs.length) {
     return { ok: false, error: 'invalid Task Brief envelope', reasons: errs, note: SCHEMA_NOTE };
   }
-  const state = getState();
-  const task_id = nextTaskId(state);
-  const r = await appendEvent({
-    actor: 'orchestrator',
-    action: 'task_created',
-    task_id,
-    title: args.title,
-    assignee_role: args.assignee_role || null,
-    task_class: args.task_class,
-    acceptance_criteria: args.acceptance_criteria,
-    budget_tokens: args.budget_tokens,
-    context_refs: args.context_refs || [],
-    priority: args.priority || null,
-    definition_of_done: args.definition_of_done || null,
+  return withLock(async () => {
+    const events = readEvents();
+    const state = engine.stateFromEvents(events);
+    const task_id = nextTaskId(state); // INSIDE the lock — race-free (finding 1)
+    const r = await appendEventLocked({
+      actor: 'orchestrator',
+      action: 'task_created',
+      task_id,
+      title: args.title,
+      assignee_role: args.assignee_role || null,
+      task_class: args.task_class,
+      acceptance_criteria: args.acceptance_criteria,
+      budget_tokens: args.budget_tokens,
+      context_refs: args.context_refs || [],
+      priority: args.priority || null,
+      definition_of_done: args.definition_of_done || null,
+    }, { events });
+    if (r.duplicate) return { ok: false, error: `duplicate task_created event ${r.event_id}` };
+    // Deterministic response built from OUR request + OUR event timestamp —
+    // never re-reads shared state (finding 10).
+    const ts = r.event.ts;
+    const task = {
+      task_id,
+      title: args.title,
+      assignee_role: args.assignee_role || null,
+      task_class: args.task_class,
+      budget_tokens: args.budget_tokens,
+      acceptance_criteria: args.acceptance_criteria.slice(),
+      context_refs: (args.context_refs || []).slice(),
+      priority: args.priority || null,
+      definition_of_done: args.definition_of_done || null,
+      status: 'todo',
+      progress_percent: 0,
+      artifacts: [],
+      blockers: [],
+      notes_for_qa: '',
+      created_ts: ts,
+      updated_ts: ts,
+      reports: [],
+    };
+    return { ok: true, task_id, task };
   });
-  const task = getState().tasks.find((t) => t.task_id === task_id);
-  return { ok: true, task_id, task };
 }
 
 async function taskUpdate(task_id, patch) {
-  const state = getState();
-  const task = state.tasks.find((t) => t.task_id === task_id);
-  if (!task) {
-    return { ok: false, error: `unknown task_id '${task_id}' — board has: ${state.tasks.map((t) => t.task_id).join(', ') || '(no tasks)'}` };
-  }
-  const errs = validateResultReportPatch(patch);
-  if (errs.length) {
-    return { ok: false, error: `invalid Result Report envelope for ${task_id}`, reasons: errs, note: SCHEMA_NOTE };
-  }
-  const boardStatus =
-    patch.board_status ||
-    (patch.status && ENVELOPE_STATUSES.includes(patch.status) ? boardStatusForReportStatus(patch.status) : undefined);
-  const r = await appendEvent({
-    actor: 'executor',
-    action: 'task_updated',
-    task_id,
-    status: patch.status,
-    board_status: boardStatus,
-    progress_percent: patch.progress_percent,
-    artifacts: patch.artifacts,
-    blockers: patch.blockers,
-    notes_for_qa: patch.notes_for_qa,
+  return withLock(async () => {
+    const events = readEvents();
+    const state = engine.stateFromEvents(events);
+    const task = state.tasks.find((t) => t.task_id === task_id);
+    if (!task) {
+      return { ok: false, error: `unknown task_id '${task_id}' — board has: ${state.tasks.map((t) => t.task_id).join(', ') || '(no tasks)'}` };
+    }
+    const errs = validateResultReportPatch(patch);
+    if (errs.length) {
+      return { ok: false, error: `invalid Result Report envelope for ${task_id}`, reasons: errs, note: SCHEMA_NOTE };
+    }
+    const boardStatus =
+      patch.board_status ||
+      (patch.status && ENVELOPE_STATUSES.includes(patch.status) ? boardStatusForReportStatus(patch.status) : undefined);
+    const r = await appendEventLocked({
+      actor: 'executor',
+      action: 'task_updated',
+      task_id,
+      status: patch.status,
+      board_status: boardStatus,
+      progress_percent: patch.progress_percent,
+      artifacts: patch.artifacts,
+      blockers: patch.blockers,
+      notes_for_qa: patch.notes_for_qa,
+    }, { events });
+    if (r.duplicate) return { ok: false, error: `duplicate task_updated event ${r.event_id}` };
+    return {
+      ok: true,
+      task_id,
+      board_status: boardStatus || task.status,
+      progress_percent: typeof patch.progress_percent === 'number' ? patch.progress_percent : task.progress_percent,
+      event_id: r.event.event_id,
+    };
   });
-  const updated = getState().tasks.find((t) => t.task_id === task_id);
-  return { ok: true, task_id, board_status: updated.status, progress_percent: updated.progress_percent, event_id: r.event.event_id };
 }
 
 /*
@@ -458,71 +311,74 @@ function utilEventsForSession(events, sessionId) {
 }
 
 async function taskAssign(task_id, role, session_id) {
-  const state = getState();
-  const task = state.tasks.find((t) => t.task_id === task_id);
-  if (!task) {
-    return { ok: false, error: `unknown task_id '${task_id}'` };
-  }
-  if (typeof role !== 'string' || !role.trim()) {
-    return { ok: false, error: "'role' must be a non-empty string" };
-  }
-  const events = readEvents();
-  let sid = session_id;
-  if (!sid) {
-    for (let i = events.length - 1; i >= 0; i--) {
-      const ev = events[i];
-      if (ev.actor === role && ev.session_id) { sid = ev.session_id; break; }
+  return withLock(async () => {
+    const events = readEvents();
+    const state = engine.stateFromEvents(events);
+    const task = state.tasks.find((t) => t.task_id === task_id);
+    if (!task) {
+      return { ok: false, error: `unknown task_id '${task_id}'` };
     }
-  }
-  if (!sid) {
-    return {
-      ok: false,
-      error: `assignment refused: no session with utilization history found for role '${role}'`,
-      reasons: [
-        `no ledger event carries actor='${role}' together with a session_id`,
-        "pass session_id explicitly, or have the target session emit a util event first (event_log with session_id)",
-      ],
-      gate: 'compaction_freshness',
-    };
-  }
-  const utilEvs = utilEventsForSession(events, sid);
-  if (utilEvs.length === 0) {
-    return {
-      ok: false,
-      error: `assignment refused: session '${sid}' has NO util-related events`,
-      reasons: [
-        'gate requires a valid compaction_done for the target session (plan §10 item 4)',
-        'the session must call compaction_ack(session_id, util_after) after its Librarian hand-off',
-      ],
-      gate: 'compaction_freshness',
-    };
-  }
-  const latest = utilEvs[utilEvs.length - 1];
-  if (latest.action !== 'compaction_done') {
-    return {
-      ok: false,
-      error: `assignment refused: freshness rule violated for session '${sid}'`,
-      reasons: [
-        `latest util-related event is '${latest.action}' at ${latest.ts}, not 'compaction_done'`,
-        "a compaction_done counts ONLY while it is the LATEST util-related event for the session (plan §6.2 item 5)",
-        'the session must perform its Librarian hand-off and call compaction_ack again',
-      ],
-      gate: 'compaction_freshness',
-    };
-  }
-  const r = await appendEvent({
-    actor: 'orchestrator',
-    action: 'task_assigned',
-    task_id,
-    role,
-    session_id: sid,
+    if (typeof role !== 'string' || !role.trim()) {
+      return { ok: false, error: "'role' must be a non-empty string" };
+    }
+    let sid = session_id;
+    if (!sid) {
+      for (let i = events.length - 1; i >= 0; i--) {
+        const ev = events[i];
+        if (ev.actor === role && ev.session_id) { sid = ev.session_id; break; }
+      }
+    }
+    if (!sid) {
+      return {
+        ok: false,
+        error: `assignment refused: no session with utilization history found for role '${role}'`,
+        reasons: [
+          `no ledger event carries actor='${role}' together with a session_id`,
+          "pass session_id explicitly, or have the target session emit a util event first (event_log with session_id)",
+        ],
+        gate: 'compaction_freshness',
+      };
+    }
+    const utilEvs = utilEventsForSession(events, sid);
+    if (utilEvs.length === 0) {
+      return {
+        ok: false,
+        error: `assignment refused: session '${sid}' has NO util-related events`,
+        reasons: [
+          'gate requires a valid compaction_done for the target session (plan §10 item 4)',
+          'the session must call compaction_ack(session_id, util_after) after its Librarian hand-off',
+        ],
+        gate: 'compaction_freshness',
+      };
+    }
+    const latest = utilEvs[utilEvs.length - 1];
+    if (latest.action !== 'compaction_done') {
+      return {
+        ok: false,
+        error: `assignment refused: freshness rule violated for session '${sid}'`,
+        reasons: [
+          `latest util-related event is '${latest.action}' at ${latest.ts}, not 'compaction_done'`,
+          "a compaction_done counts ONLY while it is the LATEST util-related event for the session (plan §6.2 item 5)",
+          'the session must perform its Librarian hand-off and call compaction_ack again',
+        ],
+        gate: 'compaction_freshness',
+      };
+    }
+    const r = await appendEventLocked({
+      actor: 'orchestrator',
+      action: 'task_assigned',
+      task_id,
+      role,
+      session_id: sid,
+    }, { events });
+    if (r.duplicate) return { ok: false, error: `duplicate task_assigned event ${r.event_id}` };
+    return { ok: true, task_id, role, session_id: sid, board_status: 'doing', event_id: r.event.event_id };
   });
-  return { ok: true, task_id, role, session_id: sid, board_status: 'doing', event_id: r.event.event_id };
 }
 
-/** Compact snapshot for any session (cheap to call, event-driven drains). */
+/** Compact snapshot for any session (cheap to call, side-effect free). */
 function boardRead() {
-  const state = rebuildState();
+  const state = engine.foldState();
   const byStatus = {};
   for (const s of BOARD_STATUSES) byStatus[s] = 0;
   for (const t of state.tasks) byStatus[t.status] = (byStatus[t.status] || 0) + 1;
@@ -601,6 +457,7 @@ module.exports = {
   LEDGER_FILE,
   STATE_FILE,
   LOCK_FILE,
+  MIRRORS_STAMP_FILE,
   TELEMETRY_FILE,
   MODELS_FILE,
   BATCHES_DIR,
@@ -617,11 +474,16 @@ module.exports = {
   atomicWriteText,
   atomicWriteJson,
   withLock,
+  registerPostAppendHook,
+  ledgerStamp,
   readEvents,
   appendEvent,
   appendEventLocked,
   rebuildState,
   getState,
+  stateFromEvents: engine.stateFromEvents,
+  foldState: engine.foldState,
+  nextTaskId,
   boardStatusForReportStatus,
   validateTaskBriefInput,
   validateResultReportPatch,

@@ -6,7 +6,8 @@
   "type": "commonjs",
   "scripts": {
     "start": "node src/server.js",
-    "test": "node test/smoke.js"
+    "live": "node src/live-server.js",
+    "test": "node test/smoke.js && node test/regression.js && node test/live-server.js"
   },
   "engines": {
     "node": ">=20"

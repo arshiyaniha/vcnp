@@ -264,7 +264,7 @@ Without a reachable provider, `llm_batch_submit` still works — every job compl
 - [ ] Out-of-process batch worker (batches currently live inside the server process)
 - [ ] Provider/model presets for `office/models.json`
 - [ ] Dashboard language toggle (currently Persian-first)
-- [ ] Public packaging & release (repository is currently private)
+- [ ] Public packaging & release
 
 ## 🤝 Contributing
 
@@ -275,7 +275,7 @@ Without a reachable provider, `llm_batch_submit` still works — every job compl
 
 ## 📄 License
 
-This repository is currently **private** — no open-source license has been published yet. All rights reserved by the maintainers until a license is added.
+No open-source license has been published yet. All rights reserved by the maintainers until a license is added.
 
 ---
 

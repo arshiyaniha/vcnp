@@ -183,10 +183,25 @@
   }
   app.hidden = false;
 
+  // HTML-escape every dynamic value before it reaches innerHTML.
+  // NOTE: the previous version mapped each character to its backslash-hex
+  // escape — which evaluates to the SAME character — turning esc() into an
+  // identity function (XSS hole). Real entity mapping below, assembled by
+  // concatenation exactly like the safe esc() in dashboard-pixel.html.
   var esc = function (s) {
-    return String(s == null ? '' : s)
-      .replace(/&/g, '\x26').replace(/</g, '\x3C').replace(/>/g, '\x3E')
-      .replace(/"/g, '\x22').replace(/'/g, '\x27');
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      // Entity strings are assembled by concatenation (same trick as
+      // dashboard-pixel.html) so HTML entity decoding can never corrupt
+      // this inline script back into an identity function.
+      var E = {
+        '&': '&' + 'amp;',
+        '<': '&' + 'lt;',
+        '>': '&' + 'gt;',
+        '"': '&' + 'quot;',
+        "'": '&' + '#39;'
+      };
+      return E[c];
+    });
   };
 
   // --- project header ---

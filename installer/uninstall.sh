@@ -79,8 +79,15 @@ esac
 OFFICE="$TARGET/office"
 if [ "$DEL_OFFICE" = "1" ]; then
   if [ -e "$OFFICE" ]; then
-    rm -rf "$OFFICE"
-    echo "  - deleted office/ (shared state removed): $OFFICE"
+    # Identity guard: only delete a folder that IS a VCNP office (has at
+    # least one of its marker files). A bare 'office/' dir could belong to
+    # anything — never rm -rf it on guesswork.
+    if [ -f "$OFFICE/events.log.jsonl" ] || [ -f "$OFFICE/state.json" ] || [ -f "$OFFICE/BOARD.md" ]; then
+      rm -rf "$OFFICE"
+      echo "  - deleted office/ (shared state removed): $OFFICE"
+    else
+      fail "refusing to delete '$OFFICE': no VCNP office markers (events.log.jsonl / state.json / BOARD.md) found — if you are sure it is disposable, remove it manually." "حذف ‎office/ رد شد: هیچ نشانه‌ای از دفتر وی‌سی‌ان‌پی (events.log.jsonl / state.json / BOARD.md) پیدا نشد — اگر مطمئنید قابل‌حذف است، دستی حذفش کنید."
+    fi
   else
     echo '  = office/ not found — nothing to delete.'
   fi

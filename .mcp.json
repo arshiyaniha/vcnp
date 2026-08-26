@@ -23,7 +23,7 @@
     "vcnp-office": {
       "command": "node",
       "args": [
-        "mcp/vcnp-office-mcp/src/server.js"
+        "D:/VipCoderNimmApp VCNP/mcp/vcnp-office-mcp/src/server.js"
       ]
     }
   }
