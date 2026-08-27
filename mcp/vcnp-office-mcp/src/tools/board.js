@@ -39,7 +39,9 @@ const defs = [
     description:
       'Create a task on the board from Task Brief envelope fields. Validates title, task_class ' +
       '(C0-C4), acceptance_criteria (>= 1), budget_tokens (> 0 integer) against the envelope schema ' +
-      '(lightweight approximation). Returns the generated task_id (T-NNN).',
+      '(lightweight approximation). Returns the generated task_id (T-NNN). Pass `as_role` to attribute ' +
+      'the ledger event to whichever role actually planned/created it (e.g. "planner") — it defaults ' +
+      'to "orchestrator" (constitution Art. 2, the single dispatcher) only when omitted.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -51,6 +53,7 @@ const defs = [
         context_refs: { type: 'array', items: { type: 'string' } },
         priority: { enum: ['low', 'medium', 'high', 'critical'] },
         definition_of_done: { type: 'string' },
+        as_role: { enum: ['ceo', 'planner', 'orchestrator', 'executor', 'qa', 'security', 'rc', 'librarian', 'devops'] },
       },
       required: ['title', 'assignee_role', 'acceptance_criteria', 'budget_tokens', 'task_class'],
     },

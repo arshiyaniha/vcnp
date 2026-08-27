@@ -222,7 +222,13 @@ async function taskCreate(args) {
     const state = engine.stateFromEvents(events);
     const task_id = nextTaskId(state); // INSIDE the lock — race-free (finding 1)
     const r = await appendEventLocked({
-      actor: 'orchestrator',
+      // Honest attribution (real bug found in testing): this was hardcoded
+      // to 'orchestrator' regardless of who actually planned the task —
+      // e.g. the Planner charter's PRD->task-graph work got mislabeled as
+      // Orchestrator activity on the live office. `as_role` lets the real
+      // caller identify itself; still defaults to 'orchestrator' (the
+      // single-dispatcher role, constitution Art. 2) when omitted.
+      actor: args.as_role || 'orchestrator',
       action: 'task_created',
       task_id,
       title: args.title,

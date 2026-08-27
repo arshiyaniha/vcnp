@@ -59,6 +59,15 @@ function validateTaskBriefInput(a) {
   if (a.definition_of_done !== undefined && (typeof a.definition_of_done !== 'string' || !a.definition_of_done.trim())) {
     errs.push("'definition_of_done' must be a non-empty string (#/taskBrief/properties/definition_of_done, minLength: 1)");
   }
+  if (a.as_role !== undefined) {
+    // Lazy require (not at module scope) to avoid a store.js <-> envelope.js
+    // <-> tools/report.js load cycle — same pattern report.js itself uses
+    // for live/work-core.js.
+    const { ROLES } = require('../tools/report');
+    if (typeof a.as_role !== 'string' || !ROLES.includes(a.as_role)) {
+      errs.push(`'as_role' must be one of ${ROLES.join('|')} when provided`);
+    }
+  }
   return errs;
 }
 

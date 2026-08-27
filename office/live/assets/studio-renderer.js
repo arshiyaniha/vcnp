@@ -109,9 +109,7 @@
       ctx.beginPath(); ctx.arc(0, 6, 27, 0, 7); ctx.stroke();
     }
     if (p.pulseUntil && global.performance.now() < p.pulseUntil) {
-      /* hand-off pulse (§ studio-comms integration) — a real task_assigned/
-         task_created event just happened for this role; NOT a fake meeting,
-         just a transient "something happened here" glow. */
+      /* hand-off pulse: real event, transient glow — not a fake meeting. */
       ctx.globalAlpha = 0.35 + 0.25 * Math.sin(t / 120);
       ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 6;
       ctx.beginPath(); ctx.arc(0, 6, 34, 0, 7); ctx.stroke();
@@ -198,6 +196,16 @@
     ctx.restore();
   }
 
+  /* Zone floor-name text — same fix as personLabel: furniture drawn after
+     the zone tile was covering the name, so it moved to this later pass. */
+  function zoneLabel(z) {
+    var p = iso(z.x + z.w, z.y + 0.02, 0);
+    ctx.save();
+    ctx.font = '600 10.5px var(--fa),Tahoma,sans-serif'; ctx.direction = 'rtl'; ctx.textAlign = 'right';
+    ctx.fillStyle = mixc('#7b869f', z.c, 0.55); ctx.fillText(z.fa, p[0] - 6, p[1] + 14);
+    ctx.restore();
+  }
+
   /* ---------- scene ---------- */
   function scene(t) {
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
@@ -216,9 +224,9 @@
     ZONES.forEach(function (z) {
       tile(z.x, z.y, z.w, z.h, mixc('#eef1f7', z.c, 0.13));
       tile(z.x, z.y, z.w, z.h, null, mixc('#ffffff', z.c, 0.55), 1.6);
-      var p = iso(z.x + z.w, z.y + 0.02, 0);
-      ctx.font = '600 10.5px var(--fa),Tahoma,sans-serif'; ctx.direction = 'rtl'; ctx.textAlign = 'right';
-      ctx.fillStyle = mixc('#7b869f', z.c, 0.55); ctx.fillText(z.fa, p[0] - 6, p[1] + 14);
+      /* Label TEXT moved to zoneLabel(), drawn in the post-furniture pass
+         below (real bug: furniture placed after this point in z-order —
+         desks/shelves/racks — painted over the zone name otherwise). */
     });
 
     ctx.globalAlpha = .9;
@@ -266,6 +274,7 @@
 
     var painted = ROLES.slice().sort(function (a, b) { return (a.cx + a.cy) - (b.cx + b.cy); });
     painted.forEach(function (p) { person(p, t); });
+    ZONES.forEach(function (z) { zoneLabel(z); });
     painted.forEach(function (p) { personLabel(p); });
     ctx.restore();
   }
@@ -367,10 +376,8 @@
   }
   var cardEl;
   function open(p) {
-    /* applyRoles() re-calls open() on every live tick to keep an open dossier
-       fresh (new chat replies, new tasks) — preserve any in-progress typed
-       draft across that rebuild so a live update never wipes what the user
-       is mid-typing. */
+    /* applyRoles() re-calls open() every tick to keep the dossier fresh —
+       preserve any in-progress draft so a live update never wipes it. */
     var draftInput = document.getElementById('chatInput');
     var draft = (SEL === p.r && draftInput) ? draftInput.value : '';
     SEL = p.r;
@@ -395,12 +402,8 @@
   }
   function close() { SEL = null; if (cardEl) cardEl.hidden = true; rail(); }
 
-  /* Hand-off pulse — a transient glow, NOT a fake meeting: driven directly by
-     real task_assigned/task_created ledger events (via recent_events, cross-
-     referenced against tasks[].assignee_role since the composed recent_events
-     projection drops the assignee field). Cold-start (the very first apply(),
-     e.g. from the static snapshot) only seeds SEEN_EVENT_KEYS — it never fires,
-     so reloading the page doesn't replay old hand-offs. */
+  /* Transient glow (not a fake meeting) for a real task_assigned/task_created
+     event; cold-start only seeds SEEN_EVENT_KEYS, never fires. */
   function pulse(roles, ms) {
     var until = global.performance.now() + (ms || 2600);
     (roles || []).forEach(function (r) { if (BY[r]) BY[r].pulseUntil = until; });

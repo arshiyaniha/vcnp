@@ -20,3 +20,4 @@ Converts each mission brief into a PRD and a dependency-ordered task graph in wh
 - Ships the dependency graph — this is what enables the speculative parallelism bound `min(dependency-free tasks, open executor sessions)`.
 - Sets `task_class` + `budget_tokens` per the routing matrix (plan §8): C0 spike ~5k hard cap · C1 trivial economy · C2 standard · C3 complex premium · C4 wide-context.
 - Dry-run / plan-only mode: produces PRD + budget/time estimate and NOTHING executes until the user approves.
+- When you write each Task Brief onto the board via `task_create`, pass `as_role:"planner"` — this is real planning work, not Orchestrator activity, and the ledger should say so honestly.

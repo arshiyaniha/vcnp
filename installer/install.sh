@@ -2,12 +2,19 @@
 #
 # VCNP Vibe-Office one-click installer (Linux / macOS / Git-Bash).
 #
-# Installs the shared "office" scaffold into a TARGET project folder and
+# Installs the shared "office" scaffold into a TARGET project folder,
 # registers the `vcnp-office` MCP server (absolute path to THIS kit's
-# mcp/vcnp-office-mcp/src/server.js) in the target's `.mcp.json`.
+# mcp/vcnp-office-mcp/src/server.js, PINNED via VCNP_OFFICE_WORKSPACE so the
+# target's own office/ is used even when the kit sits inside/near the
+# target) in the target's `.mcp.json`, copies the "brain" files the roles
+# need to run standalone (.roomodes.json, core/, skills/, adapters/, the
+# Claude Code adapter), then starts the live server and opens the studio
+# view — nothing manual left for the end user.
 #
 # Guarantees:
-#   - Never overwrites existing office/ files (only fills what is missing).
+#   - Never overwrites existing office/ files (only fills what is missing) —
+#     that's per-project DATA. The brain files ARE overwritten every run —
+#     they are kit CODE and should stay in sync with the kit version.
 #   - Preserves every existing entry in `.mcp.json` (read -> parse -> add -> write).
 #   - Refuses to touch a `.mcp.json` that is not valid JSON.
 #
@@ -63,7 +70,7 @@ if [ "${NODE_MAJOR:-0}" -lt 20 ]; then
   echo 'لطفاً ابتدا نسخهٔ LTS را از https://nodejs.org نصب کنید، ترمینال را بسته و دوباره باز کنید، سپس نصاب را دوباره اجرا کنید.'
   exit 1
 fi
-echo "[1/4] Node.js ${NODE_VERSION:-unknown} OK"
+echo "[1/6] Node.js ${NODE_VERSION:-unknown} OK"
 
 # ------------------------------------------- 2) office/ scaffold (fill gaps)
 OFFICE="$TARGET/office"
@@ -78,7 +85,7 @@ write_if_missing() { # write_if_missing PATH CONTENT(with trailing newline)
   echo "  + created       : $1"
 }
 
-echo '[2/4] Creating office/ scaffold (missing files only — nothing is overwritten):'
+echo '[2/6] Creating office/ scaffold (missing files only — nothing is overwritten):'
 
 STATE_JSON='{
   "schema_version": "1.0",
@@ -138,8 +145,50 @@ write_if_missing "$OFFICE/memory-bank/progress.md" \
   "# Progress — what works, what's left, status timeline (Librarian-owned)
 "
 
-# --------------------------------------------------- 3) register MCP server
-echo '[3/4] Registering `vcnp-office` MCP server in .mcp.json:'
+# --------------------------------------------------- 3) copy the "brain"
+# Kit CODE, not project data — always overwritten so the target stays in
+# sync with the kit version you're installing from.
+echo '[3/6] Copying role definitions (RooCode modes, charters, skills, Claude Code adapter):'
+
+copy_kit_dir() { # copy_kit_dir REL_PATH
+  local rel="$1" src="$KIT_ROOT/$1"
+  [ -e "$src" ] || return 0
+  mkdir -p "$TARGET/$(dirname "$rel")"
+  cp -R "$src" "$TARGET/$rel"
+  echo "  + synced        : $rel"
+}
+
+for f in .roomodes.json .roomodes; do
+  [ -e "$KIT_ROOT/$f" ] && cp "$KIT_ROOT/$f" "$TARGET/$f" && echo "  + synced        : $f"
+done
+copy_kit_dir core
+copy_kit_dir skills
+copy_kit_dir adapters
+copy_kit_dir .claude/agents/vcnp
+copy_kit_dir .claude/commands/vcnp
+
+# Claude Code only auto-discovers skills under .claude/skills/, not the
+# root skills/ folder Roo reads — mirror the 7 VCNP skills there too, with
+# their core/ links bumped one level deeper (real gap found in testing).
+for s in core-board-ops core-constitution core-protocol deploy-server security-basics smart-resources web-design; do
+  src="$KIT_ROOT/skills/$s"
+  [ -e "$src" ] || continue
+  dst="$TARGET/.claude/skills/$s"
+  mkdir -p "$(dirname "$dst")"
+  cp -R "$src" "$dst"
+  if [ -f "$dst/SKILL.md" ]; then
+    sed -i.bak 's#\.\./\.\./core#../../../core#g' "$dst/SKILL.md" && rm -f "$dst/SKILL.md.bak"
+  fi
+  echo "  + synced        : .claude/skills/$s"
+done
+if [ -e "$KIT_ROOT/.claude/commands/office.md" ]; then
+  mkdir -p "$TARGET/.claude/commands"
+  cp "$KIT_ROOT/.claude/commands/office.md" "$TARGET/.claude/commands/office.md"
+  echo '  + synced        : .claude/commands/office.md'
+fi
+
+# --------------------------------------------------- 4) register MCP server
+echo '[4/6] Registering `vcnp-office` MCP server in .mcp.json:'
 
 MCP_JSON="$TARGET/.mcp.json"
 SERVER_ABS="$SERVER_JS"
@@ -148,16 +197,21 @@ case "$SERVER_ABS" in
   *) SERVER_ABS="$DEFAULT_PWD/${SERVER_ABS#./}" ;;
 esac
 SERVER_ABS="${SERVER_ABS//\\//}"        # forward slashes are JSON-friendly
+TARGET_ABS="${TARGET//\\//}"
 
 # read -> JSON parse -> add -> write ; aborts on invalid existing JSON (byte-safe for other entries)
-MERGE_JS='const fs = require("fs"); const file = process.argv[1]; const server = process.argv[2]; let cfg = {}; if (fs.existsSync(file)) { let raw; try { raw = fs.readFileSync(file, "utf8"); } catch (e) { console.error("cannot read .mcp.json: " + e.message); process.exit(2); } try { cfg = JSON.parse(raw); } catch (e) { console.error("existing .mcp.json is not valid JSON - aborting to avoid data loss: " + e.message); process.exit(2); } } if (!cfg.mcpServers || typeof cfg.mcpServers !== "object" || Array.isArray(cfg.mcpServers)) cfg.mcpServers = {}; cfg.mcpServers["vcnp-office"] = { command: "node", args: [server] }; fs.writeFileSync(file, JSON.stringify(cfg, null, 2) + "\n"); console.log("OK");'
+# VCNP_OFFICE_WORKSPACE is PINNED (fixes a real bug found in testing): the
+# server's directory-walk-then-cwd fallback can silently resolve to the
+# KIT's own office/ instead of the target's when the kit sits inside/near
+# the target — a very normal layout.
+MERGE_JS='const fs = require("fs"); const file = process.argv[1]; const server = process.argv[2]; const workspace = process.argv[3]; let cfg = {}; if (fs.existsSync(file)) { let raw; try { raw = fs.readFileSync(file, "utf8"); } catch (e) { console.error("cannot read .mcp.json: " + e.message); process.exit(2); } try { cfg = JSON.parse(raw); } catch (e) { console.error("existing .mcp.json is not valid JSON - aborting to avoid data loss: " + e.message); process.exit(2); } } if (!cfg.mcpServers || typeof cfg.mcpServers !== "object" || Array.isArray(cfg.mcpServers)) cfg.mcpServers = {}; cfg.mcpServers["vcnp-office"] = { command: "node", args: [server], env: { VCNP_OFFICE_WORKSPACE: workspace } }; fs.writeFileSync(file, JSON.stringify(cfg, null, 2) + "\n"); console.log("OK");'
 
-MERGE_OUT="$(node -e "$MERGE_JS" "$MCP_JSON" "$SERVER_ABS" 2>&1)" || \
+MERGE_OUT="$(node -e "$MERGE_JS" "$MCP_JSON" "$SERVER_ABS" "$TARGET_ABS" 2>&1)" || \
   fail "could not update $MCP_JSON — $MERGE_OUT" "به‌روزرسانی ‎.mcp.json ممکن نشد — $MERGE_OUT"
-echo "  + merged \`vcnp-office\` (absolute server path) into : $MCP_JSON"
+echo "  + merged \`vcnp-office\` (absolute server path, pinned workspace) into : $MCP_JSON"
 
-# ------------------------------------- 4) dashboard fallback + honest notes
-echo '[4/4] Dashboard fallback:'
+# ------------------------------------------------- 5) dashboard fallback
+echo '[5/6] Dashboard fallback:'
 DASH_DST="$OFFICE/dashboard.html"
 if [ -e "$DASH_DST" ]; then
   echo "  = kept existing : $DASH_DST"
@@ -166,22 +220,52 @@ else
   echo "  + copied template fallback : $DASH_DST"
 fi
 
-echo ''
-echo 'NOTE | توجه'
-echo 'This MCP server intentionally exposes NO CLI flags, so the installer cannot'
-echo 'pre-generate office/dashboard-data.js. Until the CEO runs the MCP tool'
-echo '`report_generate` once, the dashboard honestly shows its built-in'
-echo '"no data yet" screen instead of fake numbers.'
-echo ''
-echo 'این سرور عمداً هیچ پرچم خط فرمانی ندارد؛ بنابراین نصاب نمی‌تواند فایل'
-echo '‎office/dashboard-data.js را از پیش بسازد. تا زمانی که مدیر کل ابزار'
-echo '‎`report_generate` را یک بار اجرا کند، داشبورد پیام صادقانهٔ «داده‌ای نیست» نشان می‌دهد.'
-echo ''
+# --------------------- 6) start the live server + open the studio view now
+# The user should not have to do ANYTHING manual after this script.
+echo '[6/6] Starting the live office server and opening the studio view:'
+PORT=7788
+export VCNP_OFFICE_WORKSPACE="$TARGET_ABS"
+export VCNP_OFFICE_PORT="$PORT"
+LIVE_SERVER_JS="$KIT_ROOT/mcp/vcnp-office-mcp/src/live-server.js"
 
+health_ok() { curl -fsS "http://127.0.0.1:$PORT/healthz" 2>/dev/null | grep -q '"ok":true'; }
+
+if health_ok; then
+  echo "  = already running on 127.0.0.1:$PORT — not starting a second instance"
+else
+  nohup node "$LIVE_SERVER_JS" >/dev/null 2>&1 &
+  disown 2>/dev/null || true
+  tries=0
+  until health_ok || [ "$tries" -ge 20 ]; do sleep 0.5; tries=$((tries + 1)); done
+  if health_ok; then
+    echo "  + live server started and healthy on 127.0.0.1:$PORT"
+  else
+    echo '  ! live server did not report healthy in time — start it manually with `npm run live` in mcp/vcnp-office-mcp'
+  fi
+fi
+
+STUDIO_URL="http://127.0.0.1:$PORT/live/studio.html"
+if health_ok; then
+  OPENER=''
+  case "$(uname -s)" in
+    Darwin) OPENER='open' ;;
+    MINGW*|MSYS*|CYGWIN*) OPENER='cmd //c start ""' ;;
+    *) command -v xdg-open >/dev/null 2>&1 && OPENER='xdg-open' ;;
+  esac
+  if [ -n "$OPENER" ]; then
+    eval "$OPENER \"$STUDIO_URL\"" >/dev/null 2>&1 && echo "  + opened in your default browser : $STUDIO_URL" \
+      || echo "  ! could not auto-open a browser — open this URL yourself: $STUDIO_URL"
+  else
+    echo "  ! no known browser-opener on this system — open this URL yourself: $STUDIO_URL"
+  fi
+fi
+
+echo ''
 echo '=== NEXT STEPS | گام‌های بعدی ==='
-echo '1. Open the target project in VS Code + RooCode.'
-echo '2. Switch to the `vcnp-ceo` mode and describe your goal — the CEO plans and dispatches the work.'
-echo '3. After the first tasks exist, ask the CEO to run `report_generate`, then open'
-echo "   $DASH_DST"
-echo '   in any browser (double-click works — refresh for fresh data).'
+echo "1. The live office is already open at $STUDIO_URL — nothing else to run."
+echo '2. Talk to any role: in Claude Code Desktop type `/vcnp:ceo` (or any `/vcnp:<role>`),'
+echo '   or in VS Code + RooCode switch to the `vcnp-ceo` mode. Describe your goal in plain'
+echo '   language — it appears live in the browser within seconds.'
+echo '3. Later, reopen the live office anytime with the `/office` command (Claude Code) —'
+echo '   it reuses the already-running server instead of starting a second one.'
 echo 'Done. موفق باشید!'
