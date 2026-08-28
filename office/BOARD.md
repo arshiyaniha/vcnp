@@ -32,6 +32,7 @@ _(empty)_
 - **T-004** Landing hero section · executor · C2 · 100% · artifacts: 1
 - **T-005** Features grid · executor · C2 · 100% · artifacts: 2
 - **T-006** Contact footer · executor · C2 · 100% · artifacts: 1
+- **T-010** تست as_role در task_update · executor · C1 · 0% · artifacts: 0
 - [x] **P0+P1 complete** — repository scaffolded per plan §13; envelope spec [`core/protocol.md`](../core/protocol.md) + constitution [`core/constitution.md`](../core/constitution.md) written; 9 role charters in [`core/charters/`](../core/charters/) wired into [`.roomodes.json`](../.roomodes.json). Project bootstrapped 2026-08-24.
 - [x] **P2+P3 complete** — all 7 skills installed under [`skills/`](../skills/): core trio (`core-constitution`, `core-protocol` + envelope JSON Schema, `core-board-ops`) + capability skills (`web-design` + design-system starter CSS, `deploy-server` + per-recipe checklists, `security-basics`, `smart-resources`). Ledger event `phases_p2_p3_complete` appended 2026-08-24.
 - [x] **P4 complete** — MCP server [`mcp/vcnp-office-mcp/`](../mcp/vcnp-office-mcp/) implemented: 13 tools (board CRUD with envelope-schema validation, compaction-freshness assignment gate, cost-truth ledger/telemetry, model router, async `llm_batch` with semantic cache, reports, compaction ack); Node ≥20, ZERO npm dependencies; registered as `vcnp-office` in [`.mcp.json`](../.mcp.json); smoke test **22/22 PASS** (`npm test`). Ledger event `phase_p4_complete` appended 2026-08-24.

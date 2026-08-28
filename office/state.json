@@ -3,7 +3,7 @@
   "project": {
     "name": "VCNP Demo Site",
     "goal": "Prove the golden path",
-    "overall_progress": 67
+    "overall_progress": 60
   },
   "tasks": [
     {
@@ -286,7 +286,34 @@
       "created_ts": "2026-08-26T18:49:44.150Z",
       "updated_ts": "2026-08-26T18:49:44.150Z",
       "reports": []
+    },
+    {
+      "task_id": "T-010",
+      "title": "تست as_role در task_update",
+      "assignee_role": "executor",
+      "task_class": "C1",
+      "budget_tokens": 500,
+      "acceptance_criteria": [
+        "x"
+      ],
+      "context_refs": [],
+      "priority": "low",
+      "definition_of_done": "x",
+      "status": "done",
+      "progress_percent": 0,
+      "artifacts": [],
+      "blockers": [],
+      "notes_for_qa": "",
+      "created_ts": "2026-08-28T09:19:45.533Z",
+      "updated_ts": "2026-08-28T09:19:45.583Z",
+      "reports": [
+        {
+          "ts": "2026-08-28T09:19:45.583Z",
+          "status": null,
+          "progress_percent": null
+        }
+      ]
     }
   ],
-  "events_count": 58
+  "events_count": 61
 }

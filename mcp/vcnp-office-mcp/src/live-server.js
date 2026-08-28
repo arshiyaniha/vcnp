@@ -30,6 +30,7 @@ const store = require('./store');
 const compose = require('./live/compose');
 const inboxCore = require('./live/inbox-core');
 const phoneCore = require('./live/phone-core');
+const voipCore = require('./live/voip-core');
 const { createSseHub } = require('./live/sse');
 const { startWatcher } = require('./live/watcher');
 const { createHttpApi } = require('./live/http-api');
@@ -68,6 +69,11 @@ async function main() {
     // Phase 5 telephone exchange — the ONE write path shared with the CLI.
     postPhoneCall: (args) => phoneCore.receiveCall(args),
     phoneAudioDir: phoneCore.phoneDir(),
+    // PBX push trigger for the real تلفنخانه — only wired when a VoIP inbox
+    // token is actually configured; otherwise the route honestly answers 501
+    // instead of pretending to drain an inbox that was never set up.
+    voipDrain: process.env.VOIP_INBOX_TOKEN ? () => voipCore.drainOnce(voipCore.config()) : undefined,
+    voipWebhookSecret: process.env.VOIP_WEBHOOK_SECRET,
     staticRoots: [store.OFFICE_DIR, path.join(store.WORKSPACE, 'templates')],
   });
 

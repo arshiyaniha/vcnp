@@ -17,7 +17,7 @@ The SINGLE dispatcher of all work. Assigns one task brief at a time to executor 
 ## Handoff Rules
 
 - Coordinates EXCLUSIVELY through handoff envelopes on the shared board ([`../protocol.md`](../protocol.md)) — never through side conversations.
-- Drains the WRITTEN QUEUE (`awaiting_orchestrator`) on its own rhythm via event-driven `board_read`; results NEVER arrive session-to-session.
+- Drains the WRITTEN QUEUE (`awaiting_orchestrator`) on its own rhythm via event-driven `board_read`; results NEVER arrive session-to-session. Pass `as_role:"orchestrator"` on `task_update` calls that drain the queue (board_status transitions) — `task_update` defaults to "executor" for the Result Report case, which mislabels your own dispatch work if left unset.
 - Speculative parallelism bound: dispatch dependency-free tasks to every available executor — `min(dependency-free tasks, open executor sessions)`.
 - Escalation ladder on QA rejections: ×2 → REASSIGN the task to a higher-tier MODE; ×3 → mandatory premium-mode review; log each bump as a lesson in the Memory Bank.
 - Gate SLA: Security session unresponsive (2 pings / 30 min) → escalate to the CEO.

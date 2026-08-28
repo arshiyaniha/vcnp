@@ -1,22 +1,16 @@
 /*
  * studio-renderer.js — Canvas2D isometric render loop ported from
- * `a-studio.html` (live-office plan §5.1/§5.2, Phase 6). Iso projection,
- * furniture, character rendering and camera logic stay intact (port, not a
- * rewrite). ONLY change: no `window.VCNP_DATA` reads / no mood+energy
- * re-derivation here — studio.html feeds ALREADY-NORMALIZED data via
- * `VCNPStudio.apply(normalized, meta)` (normalized = `VCNP.normalize(payload)`),
+ * `a-studio.html` (plan §5.1/§5.2). Feeds on ALREADY-NORMALIZED data via
+ * `VCNPStudio.apply(normalized, meta)` — no own mood/energy re-derivation,
  * so studio and pixel render from identical facts (plan §6 acceptance).
- * Public API: `VCNPStudio.init()` wires the DOM (same ids as the prototype)
- * and starts the loop; `VCNPStudio.apply(normalized, meta)` feeds a snapshot.
+ * Public API: `init()` wires the DOM; `apply(normalized, meta)` feeds a tick.
  */
 (function (global) {
   'use strict';
 
   var RM = global.matchMedia && global.matchMedia('(prefers-reduced-motion: reduce)').matches;
   var cv, ctx, DPR = 1, VW = 0, VH = 0;
-  /* Static layout data lives in studio-data.js (loaded first) purely to stay
-     under the 500-line cap here — roles: visual placement only, mood/energy
-     facts come from apply(). */
+  /* Static layout data lives in studio-data.js (loaded first, line-cap). */
   var SD = global.STUDIO_DATA || { ROLES: [], BY: {}, ZONES: [], SEATS: [], ST: [] };
   var ROLES = SD.ROLES, BY = SD.BY, ZONES = SD.ZONES, SEATS = SD.SEATS, ST = SD.ST;
 
@@ -88,11 +82,8 @@
     ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
   }
 
-  /* ---------- furniture ---------- */
-  /* deskSet/chair/plant/rack/shelf/table/boardFixture now live in
-     studio-furniture.js (frees line budget here) — assigned once init()
-     creates ctx; see init(). */
-  var deskSet, chair, plant, rack, shelf, table, boardFixture;
+  /* furniture drawers live in studio-furniture.js; assigned in init(). */
+  var deskSet, chair, plant, rack, shelf, table, boardFixture, ACT;
 
   /* ---------- character ---------- */
   function person(p, t) {
@@ -276,6 +267,11 @@
     painted.forEach(function (p) { person(p, t); });
     ZONES.forEach(function (z) { zoneLabel(z); });
     painted.forEach(function (p) { personLabel(p); });
+    if (ACT) {
+      var actNow = global.performance.now();
+      painted.forEach(function (p) { ACT.drawDeskCard(p); });
+      painted.forEach(function (p) { ACT.drawSayBubble(p, actNow); });
+    }
     ctx.restore();
   }
 
@@ -437,6 +433,7 @@
     var pr = typeof n.project.overall_progress === 'number' ? n.project.overall_progress
       : (n.tasks.length ? Math.round(counts.done / n.tasks.length * 100) : 0);
     detectHandoffs(n);
+    if (ACT) ACT.apply(n);
     D = {
       ok: !!n.ok,
       counts: counts,
@@ -469,6 +466,7 @@
     var FUR = global.STUDIO_FURNITURE.create({ ctx: ctx, iso: iso, box: box, blob: blob, rr: rr, mixc: mixc });
     deskSet = FUR.deskSet; chair = FUR.chair; plant = FUR.plant; rack = FUR.rack;
     shelf = FUR.shelf; table = FUR.table; boardFixture = FUR.board;
+    ACT = global.STUDIO_ACTIVITY.create({ ctx: ctx, iso: iso, rr: rr });
     resize(); fitBase();
     apply(global.VCNP ? global.VCNP.normalize(global.VCNP_DATA || null) : null, { live: false });
     clock(); global.setInterval(clock, 20000);

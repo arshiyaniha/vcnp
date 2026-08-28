@@ -283,7 +283,12 @@ async function taskUpdate(task_id, patch) {
       patch.board_status ||
       (patch.status && ENVELOPE_STATUSES.includes(patch.status) ? boardStatusForReportStatus(patch.status) : undefined);
     const r = await appendEventLocked({
-      actor: 'executor',
+      // Same honest-attribution fix as task_create: task_update is used both
+      // for Executor Result Reports AND Orchestrator queue-draining
+      // (board_status transitions) per this tool's own description, but was
+      // always hardcoded to 'executor' — a real bug found in testing that
+      // mislabeled real Orchestrator dispatch/drain work.
+      actor: patch.as_role || 'executor',
       action: 'task_updated',
       task_id,
       status: patch.status,

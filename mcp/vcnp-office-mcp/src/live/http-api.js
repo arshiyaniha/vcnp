@@ -19,6 +19,12 @@
  *                      PAIRED events append under one lock (Phase 5 §6.3/D5);
  *                      mirrors + SSE broadcast happen automatically (D2).
  *                      Without the writer dep it still answers 501 honestly.
+ *   POST /api/voip-webhook  no trusted body — a PBX push trigger for the
+ *                      real تلفنخانه (extension 108): re-drains the VoIP
+ *                      inbox API with our own token (live/voip-core.js),
+ *                      same write path as the poller/browser widget.
+ *                      Optional X-Webhook-Secret header if voipWebhookSecret
+ *                      is configured. Without the drain dep it answers 501.
  *   GET  /api/audio/<f> audio/webm|mp4|ogg|wav stream — ONLY files inside
  *                      office/phone/ (strict server-generated-name regex +
  *                      realpath containment; traversal → 403/404)
@@ -102,6 +108,8 @@ function createHttpApi(deps) {
   const inboxProject = typeof d.inboxProject === 'function' ? d.inboxProject : null;
   const staticRoots = Array.isArray(d.staticRoots) ? d.staticRoots.map((r) => path.resolve(r)) : [];
   const postPhoneCall = typeof d.postPhoneCall === 'function' ? d.postPhoneCall : null;
+  const voipDrain = typeof d.voipDrain === 'function' ? d.voipDrain : null;
+  const voipWebhookSecret = typeof d.voipWebhookSecret === 'string' && d.voipWebhookSecret ? d.voipWebhookSecret : null;
   const phoneAudioDir =
     typeof d.phoneAudioDir === 'string' && d.phoneAudioDir ? path.resolve(d.phoneAudioDir) : null;
   const bodyLimit = intOpt(d.bodyLimitBytes, DEFAULT_BODY_LIMIT_BYTES);
@@ -442,6 +450,28 @@ function createHttpApi(deps) {
         error: (r && r.error) || 'invalid_phone_call',
         reasons: (r && r.reasons) || [(r && r.error) || 'rejected'],
       });
+      return;
+    }
+
+    if (p === '/api/voip-webhook') {
+      // PBX push trigger for the real تلفنخانه (D5 follow-up): the caller
+      // supplies NO trusted content — a hook just means "something new
+      // exists". We re-fetch from the VoIP inbox API with OUR OWN token,
+      // the exact same path tools/voip-inbox-poll.js polls with, so a
+      // forged/replayed webhook call can only ever trigger a legitimate
+      // re-check, never inject fabricated audio or text.
+      if (req.method !== 'POST') throw new HttpError(405, 'method_not_allowed');
+      if (voipWebhookSecret) {
+        const got = req.headers['x-webhook-secret'];
+        if (got !== voipWebhookSecret) throw new HttpError(401, 'unauthorized');
+      }
+      await readBody(req, bodyLimit); // drain + cap; content is never trusted
+      if (!voipDrain) {
+        notImplemented(res); // contract visible, nothing fake answers
+        return;
+      }
+      const r = await voipDrain();
+      sendJson(res, r && r.ok ? 200 : 502, r || { ok: false, error: 'drain_failed' });
       return;
     }
 

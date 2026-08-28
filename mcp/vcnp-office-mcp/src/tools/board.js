@@ -70,7 +70,8 @@ const defs = [
       'artifacts string[], blockers string[] (MUST be empty when status=done), notes_for_qa string. ' +
       'status=done moves the task to the awaiting_orchestrator written queue (protocol §3). ' +
       'board_status allows explicit kanban transitions (todo|doing|awaiting_orchestrator|review|blocked|done) ' +
-      'for queue draining by the Orchestrator.',
+      'for queue draining by the Orchestrator. Pass `as_role` to attribute the ledger event honestly — ' +
+      'defaults to "executor" (the Result Report case) only when omitted.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -81,6 +82,7 @@ const defs = [
         blockers: { type: 'array', items: { type: 'string' } },
         notes_for_qa: { type: 'string' },
         board_status: { enum: store.BOARD_STATUSES },
+        as_role: { enum: ['ceo', 'planner', 'orchestrator', 'executor', 'qa', 'security', 'rc', 'librarian', 'devops'] },
       },
       required: ['task_id'],
     },

@@ -77,10 +77,20 @@ function validateTaskBriefInput(a) {
  */
 function validateResultReportPatch(patch) {
   const errs = [];
-  const allowed = ['status', 'progress_percent', 'artifacts', 'blockers', 'notes_for_qa', 'board_status'];
+  // as_role is a live-office extension (honest ledger attribution, task_update
+  // is used both for Executor Result Reports and Orchestrator queue-draining)
+  // — not part of the envelope-schema.json resultReport contract itself, but
+  // allowed here rather than rejected as an unknown field.
+  const allowed = ['status', 'progress_percent', 'artifacts', 'blockers', 'notes_for_qa', 'board_status', 'as_role'];
   for (const k of Object.keys(patch)) {
     if (!allowed.includes(k)) {
       errs.push(`'${k}' is not allowed in a Result Report update (envelope-schema.json #/resultReport, additionalProperties: false)`);
+    }
+  }
+  if (patch.as_role !== undefined) {
+    const { ROLES } = require('../tools/report');
+    if (typeof patch.as_role !== 'string' || !ROLES.includes(patch.as_role)) {
+      errs.push(`'as_role' must be one of ${ROLES.join('|')} when provided`);
     }
   }
   if (patch.status !== undefined && !ENVELOPE_STATUSES.includes(patch.status) && !BOARD_STATUSES.includes(patch.status)) {
