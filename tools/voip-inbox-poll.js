@@ -21,12 +21,19 @@
  *   VOIP_INBOX_TOKEN=... node tools/voip-inbox-poll.js --once     # one pass, exit 0
  *   VOIP_INBOX_TOKEN=... node tools/voip-inbox-poll.js --health   # health check only
  *
- * Required env: VOIP_INBOX_TOKEN (the bearer token — NEVER pass it as a CLI
- * flag, it would leak into the process list and shell history; NEVER commit
- * it; keep it in your own untracked .env / OS environment).
- * Optional env: VOIP_INBOX_BASE, VOIP_INBOX_TO_ROLE (default "ceo"),
- * VOIP_INBOX_POLL_MS (default 20000, floored at 10000), VOIP_INBOX_LIMIT
- * (default 50), VOIP_INBOX_STATE_FILE (default office/.voip-inbox-cursor.json).
+ * This kit has NO built-in VoIP server — every field below points at YOUR
+ * OWN VoIP/PBX inbox. See docs/telephone-exchange-voip-integration.md for
+ * the exact HTTP contract your VoIP side needs to expose (health/messages/
+ * audio/ack), independent of which PBX software you run.
+ *
+ * Required env: VOIP_INBOX_BASE (e.g. https://your-host/voip-agent-inbox;
+ * VOIP_INBOX_HOST + the default /voip-agent-inbox suffix works too) and
+ * VOIP_INBOX_TOKEN (the bearer token — NEVER pass it as a CLI flag, it would
+ * leak into the process list and shell history; NEVER commit it; keep it in
+ * your own untracked .env / OS environment).
+ * Optional env: VOIP_INBOX_TO_ROLE (default "ceo"), VOIP_INBOX_POLL_MS
+ * (default 20000, floored at 10000), VOIP_INBOX_LIMIT (default 50),
+ * VOIP_INBOX_STATE_FILE (default office/.voip-inbox-cursor.json).
  *
  * ZERO npm dependencies — Node.js >= 20 stdlib + global fetch only.
  */
@@ -71,10 +78,12 @@ async function runForever(cfg, once) {
 
 (async () => {
   const cfg = voip.config();
-  if (!cfg.token) {
+  if (!cfg.base || !cfg.token) {
     process.stderr.write(
-      'VOIP_INBOX_TOKEN is not set. Export it in your shell/OS environment (never in git):\n' +
-      '  export VOIP_INBOX_TOKEN=\'vai_...\'\n'
+      'VOIP_INBOX_BASE (or VOIP_INBOX_HOST) and VOIP_INBOX_TOKEN must both be set — this kit has no\n' +
+      'built-in VoIP server; point these at YOUR OWN inbox (see docs/telephone-exchange-voip-integration.md):\n' +
+      '  export VOIP_INBOX_BASE=\'https://your-voip-host/voip-agent-inbox\'\n' +
+      '  export VOIP_INBOX_TOKEN=\'...\'\n'
     );
     process.exit(1);
   }

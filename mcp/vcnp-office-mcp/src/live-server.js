@@ -72,7 +72,9 @@ async function main() {
     // PBX push trigger for the real تلفنخانه — only wired when a VoIP inbox
     // token is actually configured; otherwise the route honestly answers 501
     // instead of pretending to drain an inbox that was never set up.
-    voipDrain: process.env.VOIP_INBOX_TOKEN ? () => voipCore.drainOnce(voipCore.config()) : undefined,
+    voipDrain: (process.env.VOIP_INBOX_TOKEN && (process.env.VOIP_INBOX_BASE || process.env.VOIP_INBOX_HOST))
+      ? () => voipCore.drainOnce(voipCore.config())
+      : undefined,
     voipWebhookSecret: process.env.VOIP_WEBHOOK_SECRET,
     staticRoots: [store.OFFICE_DIR, path.join(store.WORKSPACE, 'templates')],
   });

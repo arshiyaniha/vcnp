@@ -26,12 +26,24 @@ const phoneCore = require('./phone-core');
 
 const MAX_BACKOFF_MS = 5 * 60 * 1000;
 
+/**
+ * Every field here is YOUR OWN VoIP inbox — there is no built-in default
+ * server. This kit ships with zero opinion about whose PBX you use; see
+ * docs/telephone-exchange-voip-integration.md for the HTTP contract your
+ * VoIP/PBX side needs to expose, then set these three env vars to point at
+ * it. VOIP_INBOX_BASE/VOIP_INBOX_TOKEN are required — left null (not a
+ * placeholder host) when unset, so a misconfigured install fails honestly
+ * instead of silently talking to someone else's server.
+ */
 function config() {
-  const host = (process.env.VOIP_INBOX_HOST || 'https://voip.arshiyaniha.ir').replace(/\/+$/, '');
+  const host = process.env.VOIP_INBOX_HOST ? process.env.VOIP_INBOX_HOST.replace(/\/+$/, '') : null;
+  const base = process.env.VOIP_INBOX_BASE
+    ? process.env.VOIP_INBOX_BASE.replace(/\/+$/, '')
+    : (host ? `${host}/voip-agent-inbox` : null);
   return {
     host,
-    base: (process.env.VOIP_INBOX_BASE || `${host}/voip-agent-inbox`).replace(/\/+$/, ''),
-    token: process.env.VOIP_INBOX_TOKEN,
+    base,
+    token: process.env.VOIP_INBOX_TOKEN || null,
     toRole: process.env.VOIP_INBOX_TO_ROLE || 'ceo',
     limit: Number.parseInt(process.env.VOIP_INBOX_LIMIT, 10) || 50,
     pollMs: Math.max(10000, Number.parseInt(process.env.VOIP_INBOX_POLL_MS, 10) || 20000),
